@@ -1,0 +1,13 @@
+# Local state (created at runtime)
+prs.txt
+prs-failed.txt
+prs-skipped.txt
+prs-merged.txt
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Secrets — copy .env.example to .env instead
+.env

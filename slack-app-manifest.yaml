@@ -1,0 +1,55 @@
+# Slack app manifest for the merge-queue bot.
+#
+# Create the app:
+#   1. https://api.slack.com/apps → Create New App → From an app manifest
+#   2. Pick your workspace → paste this file (or upload it)
+#   3. Basic Information → App-Level Tokens → Generate Token
+#      Scope: connections:write  (required for Socket Mode)
+#   4. Install App → copy Bot User OAuth Token (xoxb-...)
+#   5. Copy .env.example → .env, fill in tokens, run ./start.sh
+#
+# Invite the bot to your channel: /invite @merge-bot
+
+display_information:
+  name: Merge Queue Bot
+  description: FIFO merge queue for GetStream/chat — queue PRs, sync with master, wait for CI, squash merge.
+  long_description: |
+    Merge Queue Bot manages a first-in-first-out merge queue for the GetStream/chat repository only.
+
+    Queue pull requests from Slack, sync each branch with the base branch, wait for CI on the latest commit, and squash merge when green. Skips PRs that cannot merge (missing approval, conflicts, branch protection) and retries flaky CI failures.
+
+    Commands: /merge to queue a PR, /merge-status for the queue, /merge-history for recent outcomes.
+
+    For GetStream/chat only — not for other GitHub repositories.
+  background_color: "#0052cc"
+
+features:
+  bot_user:
+    display_name: merge-bot
+    always_online: true
+  slash_commands:
+    - command: /merge
+      description: Add a PR to the merge queue
+      usage_hint: "12345 or https://github.com/GetStream/chat/pull/12345"
+      should_escape: false
+    - command: /merge-status
+      description: Show the current merge queue
+      should_escape: false
+    - command: /merge-history
+      description: Show recent merge queue outcomes
+      usage_hint: "5 (optional count, max 50)"
+      should_escape: false
+
+oauth_config:
+  scopes:
+    bot:
+      - commands
+      - chat:write
+      - chat:write.public
+
+settings:
+  socket_mode_enabled: true
+  org_deploy_enabled: false
+  token_rotation_enabled: false
+  interactivity:
+    is_enabled: false
