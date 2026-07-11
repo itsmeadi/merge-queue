@@ -91,6 +91,10 @@ slack_post() {
   fi
 }
 
+slack_msg() {
+  python3 "$SCRIPT_DIR/messages.py" "$@"
+}
+
 parse_pr_url() {
   local url="$1"
   if [[ "$url" =~ github\.com/([^/]+)/([^/]+)/pull/([0-9]+) ]]; then
@@ -143,7 +147,7 @@ skip_pr() {
   local reason="$2"
   log "Skipping $url — $reason"
   append_skipped "$url" "$reason"
-  slack_post ":fast_forward: Skipped \`${url}\` — ${reason}"
+  slack_post "$(slack_msg skip "$url" "$reason")"
   remove_from_queue "$url"
 }
 
@@ -306,12 +310,12 @@ process_pr() {
   local retries=0 ci_result
 
   log "Processing $url"
-  slack_post ":hourglass_flowing_sand: Processing \`${url}\` — syncing with base..."
+  slack_post "$(slack_msg processing "$url")"
 
   if ! parse_pr_url "$url"; then
     log "Malformed URL, moving to failed file: $url"
     append_failed "$url" "malformed URL"
-    slack_post ":x: Failed \`${url}\` — malformed URL"
+    slack_post "$(slack_msg failed "$url" "malformed URL")"
     remove_from_queue "$url"
     return 0
   fi
@@ -319,14 +323,14 @@ process_pr() {
   local state
   state="$(gh pr view "$url" --json state -q .state 2>/dev/null)" || {
     append_failed "$url" "gh pr view failed"
-    slack_post ":x: Failed \`${url}\` — could not fetch PR"
+    slack_post "$(slack_msg failed "$url" "gh pr view failed")"
     remove_from_queue "$url"
     return 0
   }
 
   if [[ "$state" == "MERGED" || "$state" == "CLOSED" ]]; then
     log "PR already $state, removing from queue"
-    slack_post ":information_source: \`${url}\` already ${state}, removed from queue"
+    slack_post "$(slack_msg already_done "$url" "$state")"
     remove_from_queue "$url"
     return 0
   fi
@@ -377,13 +381,13 @@ process_pr() {
       if merge_out="$(gh pr merge "$url" "$(merge_flag)" 2>&1)"; then
         log "Merged $url"
         append_merged "$url"
-        slack_post ":white_check_mark: Merged \`${url}\`"
+        slack_post "$(slack_msg merged "$url")"
         remove_from_queue "$url"
       elif classify_merge_error "$merge_out"; then
         skip_pr "$url" "$(echo "$merge_out" | head -1)"
       else
         append_failed "$url" "merge failed: $(echo "$merge_out" | head -1)"
-        slack_post ":x: Failed \`${url}\` — merge failed after CI passed"
+        slack_post "$(slack_msg failed "$url" "merge failed after CI passed")"
         remove_from_queue "$url"
       fi
       return 0
@@ -392,7 +396,7 @@ process_pr() {
     if (( retries >= MAX_RETRIES )); then
       log "CI failed after $MAX_RETRIES reruns, moving to failed file"
       append_failed "$url" "CI failed after $MAX_RETRIES reruns"
-      slack_post ":x: Failed \`${url}\` — CI failed after ${MAX_RETRIES} reruns"
+      slack_post "$(slack_msg failed "$url" "CI failed after $MAX_RETRIES reruns")"
       remove_from_queue "$url"
       return 0
     fi
@@ -406,10 +410,10 @@ process_pr() {
       continue
     fi
 
-    slack_post ":arrows_counterclockwise: \`${url}\` — CI failed, rerunning ($((retries + 1))/${MAX_RETRIES})..."
+    slack_post "$(slack_msg ci_rerun "$url" "$((retries + 1))" "$MAX_RETRIES")"
     if ! rerun_failed_ci "$url"; then
       append_failed "$url" "CI failed and could not rerun workflow"
-      slack_post ":x: Failed \`${url}\` — CI failed and could not rerun workflow"
+      slack_post "$(slack_msg failed "$url" "CI failed and could not rerun workflow")"
       remove_from_queue "$url"
       return 0
     fi
@@ -440,7 +444,7 @@ main() {
   log "Watching $PR_QUEUE_FILE (poll every ${POLL_INTERVAL}s, max retries: $MAX_RETRIES, merge: $MERGE_METHOD)"
   if [[ -n "$SLACK_BOT_TOKEN" && -n "$SLACK_CHANNEL_ID" ]]; then
     log "Slack notifications enabled (channel: $SLACK_CHANNEL_ID)"
-    slack_post ":robot_face: Merge queue worker started (poll every ${POLL_INTERVAL}s)"
+    slack_post "$(slack_msg worker_started "$POLL_INTERVAL")"
   else
     log "WARN: SLACK_BOT_TOKEN or SLACK_CHANNEL_ID unset — worker will not post to Slack"
   fi

@@ -16,6 +16,8 @@ from pathlib import Path
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
+from messages import format_history_lines, format_queue_status, format_queued
+
 INSTALL_DIR = Path(__file__).resolve().parent
 QUEUE_DATA_DIR = Path(os.environ.get("MERGE_QUEUE_DIR", "/srv/stream/merge-queue"))
 PR_QUEUE_FILE = Path(os.environ.get("PR_QUEUE_FILE", QUEUE_DATA_DIR / "prs.txt"))
@@ -33,11 +35,6 @@ PR_URL_RE = re.compile(r"github\.com/[^/]+/[^/]+/pull/\d+")
 HISTORY_LINE_RE = re.compile(
     r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (\S+)(?: # (.+))?$"
 )
-OUTCOME_EMOJI = {
-    "merged": ":white_check_mark:",
-    "skipped": ":fast_forward:",
-    "failed": ":x:",
-}
 
 
 @dataclass(frozen=True)
@@ -114,41 +111,17 @@ def read_recent_history(n: int) -> list[HistoryEntry]:
     return entries[:n]
 
 
-def short_pr_label(url: str) -> str:
-    match = re.search(r"/pull/(\d+)", url)
-    return f"pull/{match.group(1)}" if match else url
-
-
-def format_history(n: int) -> str:
+def build_history_message(n: int) -> str:
     entries = read_recent_history(n)
-    lines = [f"*Recent merge queue history* (last {n})"]
-    if not entries:
-        lines.append("_No completed PRs yet_")
-        return "\n".join(lines)
-
-    for entry in entries:
-        emoji = OUTCOME_EMOJI.get(entry.outcome, ":grey_question:")
-        ts = entry.timestamp.strftime("%Y-%m-%d %H:%M")
-        label = short_pr_label(entry.url)
-        detail = entry.reason or entry.outcome
-        lines.append(f"{emoji} {ts} — {label} — {detail}")
-    return "\n".join(lines)
+    rows = [(e.timestamp, e.url, e.outcome, e.reason) for e in entries]
+    return format_history_lines(rows, n)
 
 
-def format_queue_status() -> str:
+def build_queue_status_message() -> str:
     queue = read_queue()
     failed = [line for line in PR_FAILED_FILE.read_text().splitlines() if line.strip()] if PR_FAILED_FILE.exists() else []
     skipped = [line for line in PR_SKIPPED_FILE.read_text().splitlines() if line.strip()] if PR_SKIPPED_FILE.exists() else []
-
-    lines = ["*Merge queue*"]
-    if not queue:
-        lines.append("_Queue is empty_")
-    else:
-        for i, url in enumerate(queue):
-            marker = ":arrow_forward:" if i == 0 else f"{i + 1}."
-            lines.append(f"{marker} {url}")
-    lines.append(f"\n_{len(queue)} queued · {len(failed)} failed · {len(skipped)} skipped total_")
-    return "\n".join(lines)
+    return format_queue_status(queue, len(failed), len(skipped))
 
 
 def worker_env() -> dict[str, str]:
@@ -219,13 +192,12 @@ def create_app() -> App:
             return
 
         added, position = append_to_queue(url)
-        verb = "Queued" if added else "Already queued"
-        respond(response_type="in_channel", text=f"{verb} `{url}` at position {position}")
+        respond(response_type="in_channel", text=format_queued(url, position, added))
 
     @app.command("/merge-status")
     def handle_merge_status(ack, respond, command):
         ack()
-        respond(response_type="in_channel", text=format_queue_status())
+        respond(response_type="in_channel", text=build_queue_status_message())
 
     @app.command("/merge-history")
     def handle_merge_history(ack, respond, command):
@@ -237,7 +209,7 @@ def create_app() -> App:
                 text=f"Usage: `/merge-history` or `/merge-history 10` (1–{HISTORY_MAX})",
             )
             return
-        respond(response_type="in_channel", text=format_history(count))
+        respond(response_type="in_channel", text=build_history_message(count))
 
     return app
 
