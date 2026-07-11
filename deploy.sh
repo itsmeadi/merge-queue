@@ -61,7 +61,7 @@ main() {
   log "Deploy started (branch: $DEPLOY_BRANCH)"
 
   if [[ ! -d "$SCRIPT_DIR/.git" ]]; then
-    slack_post ":x: Deploy failed — not a git repo at \`$SCRIPT_DIR\`"
+    slack_post "Deploy failed — not a git repo at \`$SCRIPT_DIR\`"
     exit 1
   fi
 
@@ -71,7 +71,7 @@ main() {
 
   if ! pull_out="$(git -C "$SCRIPT_DIR" pull origin "$DEPLOY_BRANCH" 2>&1)"; then
     log "git pull failed: $pull_out"
-    slack_post ":x: Deploy failed — git pull error:\n\`\`\`$pull_out\`\`\`"
+    slack_post "Deploy failed — git pull error:\n\`\`\`$pull_out\`\`\`"
     exit 1
   fi
   log "$pull_out"
@@ -89,9 +89,9 @@ main() {
   fi
 
   if [[ "$before" == "$after" ]]; then
-    slack_post ":information_source: Deploy done — already up to date (\`$after\`). Restarted bot + worker."
+    slack_post "Deploy done — already up to date (\`$after\`). Restarted bot + worker."
   else
-    slack_post ":white_check_mark: Deploy done — \`$before\` → \`$after\`. Restarted bot + worker."
+    slack_post "Deploy done — \`$before\` → \`$after\`. Restarted bot + worker."
   fi
 
   kill_by_pattern "$SCRIPT_DIR/bot.py"

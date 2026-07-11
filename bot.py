@@ -266,7 +266,7 @@ def create_app() -> App:
 
         respond(
             response_type="in_channel",
-            text=":gear: Deploying — pulling from git and restarting bot + worker...",
+            text="Deploying — pulling from git and restarting bot + worker...",
         )
 
     return app
