@@ -49,7 +49,8 @@ Keep it running with `tmux`, `screen`, or systemd.
 1. https://api.slack.com/apps → Create New App → From manifest → paste `slack-app-manifest.yaml`
 2. App-Level Tokens → Generate → scope `connections:write` (for Socket Mode)
 3. Install App → copy `xoxb-...` bot token
-4. `/invite @merge-bot` in your channel
+4. Upload app icon: `icon-256.png` or `icon.png` (Basic Information → App Icon)
+5. `/invite @merge-bot` in your channel
 
 ## Slack commands
 
