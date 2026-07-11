@@ -16,7 +16,7 @@ display_information:
   long_description: |
     Queue GetStream/chat PRs from Slack. Syncs with base, waits for CI, squash merges when green.
 
-    /merge · /merge-status · /merge-history · /merge-deploy
+    /merge · /merge-status · /merge-history · /merge-deploy (admin)
   background_color: "#0052cc"
 
 features:
@@ -36,7 +36,7 @@ features:
       usage_hint: "5 (optional count, max 50)"
       should_escape: false
     - command: /merge-deploy
-      description: Pull latest from git and restart bot and worker
+      description: Pull latest code and restart bot + worker
       should_escape: false
 
 oauth_config:

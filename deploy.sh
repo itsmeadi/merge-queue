@@ -1,113 +1,101 @@
 #!/usr/bin/env bash
-# Pull latest from git and restart bot + worker.
+# Pull latest merge-queue code and restart bot + worker.
 set -euo pipefail
 
-DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$DIR"
-FROM_BOT=false
-[[ "${1:-}" == "--from-bot" ]] && FROM_BOT=true
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
-if [[ -f .env ]]; then
+SLACK_CHANNEL="${1:-${SLACK_CHANNEL_ID:-}}"
+DEPLOY_LOG="${SCRIPT_DIR}/deploy.log"
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
+
+if [[ -f "$SCRIPT_DIR/.env" ]]; then
   set -a
   # shellcheck disable=SC1091
-  source .env
+  source "$SCRIPT_DIR/.env"
   set +a
 fi
 
-GIT_BRANCH="${DEPLOY_GIT_BRANCH:-main}"
-LOG_FILE="${DEPLOY_LOG_FILE:-$DIR/deploy.log}"
-
 log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] deploy: $*" | tee -a "$LOG_FILE"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$DEPLOY_LOG"
 }
 
-notify_slack() {
+slack_post() {
   local text="$1"
-  if [[ -z "${SLACK_BOT_TOKEN:-}" || -z "${SLACK_CHANNEL_ID:-}" ]]; then
+  if [[ -z "${SLACK_BOT_TOKEN:-}" || -z "$SLACK_CHANNEL" ]]; then
     return 0
   fi
-  local payload
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"channel": sys.argv[1], "text": sys.argv[2]}))' "$SLACK_CHANNEL_ID" "$text")"
-  curl -sS -X POST https://slack.com/api/chat.postMessage \
+  local payload resp ok
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"channel": sys.argv[1], "text": sys.argv[2]}))' "$SLACK_CHANNEL" "$text")"
+  resp="$(curl -sS -X POST https://slack.com/api/chat.postMessage \
     -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
     -H "Content-type: application/json; charset=utf-8" \
-    -d "$payload" >/dev/null || true
+    -d "$payload")"
+  ok="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("ok", False))' <<<"$resp" 2>/dev/null || echo False)"
+  if [[ "$ok" != "True" ]]; then
+    log "WARN: failed to post to Slack: $resp"
+  fi
 }
 
-stop_pidfile() {
-  local file="$1"
-  local name="$2"
-  [[ -f "$file" ]] || return 0
-  local pid
-  pid="$(cat "$file" 2>/dev/null || true)"
-  [[ -n "$pid" ]] || return 0
-  if kill -0 "$pid" 2>/dev/null; then
-    log "stopping $name (pid $pid)"
-    kill "$pid" 2>/dev/null || true
-    for _ in $(seq 1 10); do
-      kill -0 "$pid" 2>/dev/null || break
-      sleep 1
-    done
-    kill -9 "$pid" 2>/dev/null || true
-  fi
-  rm -f "$file"
+kill_by_pattern() {
+  local pattern="$1"
+  pkill -f "$pattern" 2>/dev/null || true
+  sleep 1
 }
 
 start_worker() {
-  [[ "${START_WORKER:-true}" == "true" ]] && return 0
-  log "starting worker"
-  nohup ./worker.sh >>"${WORKER_LOG_FILE:-worker.log}" 2>&1 &
-  echo $! >"$DIR/.worker.pid"
-  log "worker pid $(cat "$DIR/.worker.pid")"
+  nohup "$SCRIPT_DIR/worker.sh" >>"$DEPLOY_LOG" 2>&1 &
+  log "Started worker (pid $!)"
 }
 
 start_bot() {
-  log "starting bot"
-  if [[ -d .venv ]]; then
-    nohup .venv/bin/python bot.py >>"${BOT_LOG_FILE:-bot.log}" 2>&1 &
-  else
-    nohup python3 bot.py >>"${BOT_LOG_FILE:-bot.log}" 2>&1 &
+  local python_cmd=(python3)
+  if [[ -x "$SCRIPT_DIR/.venv/bin/python" ]]; then
+    python_cmd=("$SCRIPT_DIR/.venv/bin/python")
   fi
-  echo $! >"$DIR/.bot.pid"
-  log "bot pid $(cat "$DIR/.bot.pid")"
-}
-
-run_deploy() {
-  log "git pull origin $GIT_BRANCH"
-  git pull origin "$GIT_BRANCH"
-  local commit
-  commit="$(git rev-parse --short HEAD)"
-
-  if [[ -d .venv ]]; then
-    log "updating venv dependencies"
-    .venv/bin/pip install -q -r requirements.txt
-  elif command -v pip3 >/dev/null 2>&1; then
-    log "updating user dependencies"
-    pip3 install --user -q -r requirements.txt 2>/dev/null || true
-  fi
-
-  stop_pidfile "$DIR/.worker.pid" "worker"
-  start_worker
-
-  notify_slack "$(python3 "$DIR/messages.py" deploy_success "$commit" "$GIT_BRANCH")"
-  log "deploy complete at $commit"
-
-  if [[ "${START_WORKER:-true}" == "true" ]]; then
-    stop_pidfile "$DIR/.bot.pid" "bot"
-    start_bot
-  elif $FROM_BOT || [[ -f "$DIR/.bot.pid" ]]; then
-    stop_pidfile "$DIR/.bot.pid" "bot"
-    start_bot
-  fi
+  nohup "${python_cmd[@]}" "$SCRIPT_DIR/bot.py" >>"$DEPLOY_LOG" 2>&1 &
+  log "Started bot (pid $!)"
 }
 
 main() {
-  notify_slack "$(python3 "$DIR/messages.py" deploy_started)"
-  if run_deploy >>"$LOG_FILE" 2>&1; then
-    return 0
+  log "Deploy started (branch: $DEPLOY_BRANCH)"
+
+  if [[ ! -d "$SCRIPT_DIR/.git" ]]; then
+    slack_post ":x: Deploy failed — not a git repo at \`$SCRIPT_DIR\`"
+    exit 1
   fi
-  notify_slack "$(python3 "$DIR/messages.py" deploy_failed "see deploy.log")"
-  exit 1
+
+  local before after pull_out=0
+  before="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD)"
+  log "Before: $before"
+
+  if ! pull_out="$(git -C "$SCRIPT_DIR" pull origin "$DEPLOY_BRANCH" 2>&1)"; then
+    log "git pull failed: $pull_out"
+    slack_post ":x: Deploy failed — git pull error:\n\`\`\`$pull_out\`\`\`"
+    exit 1
+  fi
+  log "$pull_out"
+
+  after="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD)"
+
+  if [[ -x "$SCRIPT_DIR/.venv/bin/pip" ]]; then
+    log "Updating Python dependencies"
+    "$SCRIPT_DIR/.venv/bin/pip" install -r "$SCRIPT_DIR/requirements.txt" >>"$DEPLOY_LOG" 2>&1 || true
+  fi
+
+  kill_by_pattern "$SCRIPT_DIR/worker.sh"
+  start_worker
+
+  if [[ "$before" == "$after" ]]; then
+    slack_post ":information_source: Deploy done — already up to date (\`$after\`). Restarted bot + worker."
+  else
+    slack_post ":white_check_mark: Deploy done — \`$before\` → \`$after\`. Restarted bot + worker."
+  fi
+
+  kill_by_pattern "$SCRIPT_DIR/bot.py"
+  start_bot
+
+  log "Deploy finished"
 }
 
 main "$@"

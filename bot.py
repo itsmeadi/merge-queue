@@ -27,13 +27,14 @@ PR_MERGED_FILE = Path(os.environ.get("PR_MERGED_FILE", QUEUE_DATA_DIR / "prs-mer
 DEFAULT_REPO = os.environ.get("DEFAULT_REPO", "GetStream/chat")
 SLACK_CHANNEL_ID = os.environ.get("SLACK_CHANNEL_ID", "")
 START_WORKER = os.environ.get("START_WORKER", "true").lower() != "false"
+DEPLOY_ENABLED = os.environ.get("DEPLOY_ENABLED", "false").lower() == "true"
+DEPLOY_ALLOWED_USER_IDS = {
+    uid.strip()
+    for uid in os.environ.get("DEPLOY_ALLOWED_USER_IDS", "").split(",")
+    if uid.strip()
+}
 WORKER_PATH = INSTALL_DIR / "worker.sh"
 DEPLOY_PATH = INSTALL_DIR / "deploy.sh"
-DEPLOY_ALLOWED_USERS = {
-    u.strip()
-    for u in os.environ.get("DEPLOY_ALLOWED_USERS", "").split(",")
-    if u.strip()
-}
 HISTORY_DEFAULT = 5
 HISTORY_MAX = 50
 
@@ -179,17 +180,19 @@ def parse_history_count(text: str) -> int | None:
     return min(count, HISTORY_MAX)
 
 
-def write_bot_pid() -> None:
-    (INSTALL_DIR / ".bot.pid").write_text(str(os.getpid()))
+def deploy_allowed(user_id: str) -> bool:
+    if not DEPLOY_ENABLED:
+        return False
+    if not DEPLOY_ALLOWED_USER_IDS:
+        return False
+    return user_id in DEPLOY_ALLOWED_USER_IDS
 
 
-def is_deploy_allowed(user_id: str) -> bool:
-    return bool(DEPLOY_ALLOWED_USERS) and user_id in DEPLOY_ALLOWED_USERS
-
-
-def trigger_deploy() -> None:
+def trigger_deploy(channel_id: str) -> None:
+    if not DEPLOY_PATH.is_file():
+        raise FileNotFoundError(f"deploy script not found: {DEPLOY_PATH}")
     subprocess.Popen(
-        [str(DEPLOY_PATH), "--from-bot"],
+        [str(DEPLOY_PATH), channel_id],
         cwd=INSTALL_DIR,
         env=worker_env(),
         start_new_session=True,
@@ -238,30 +241,39 @@ def create_app() -> App:
     def handle_merge_deploy(ack, respond, command):
         ack()
         user_id = command.get("user_id", "")
-        if not DEPLOY_ALLOWED_USERS:
+
+        if not DEPLOY_ENABLED:
             respond(
                 response_type="ephemeral",
-                text="Deploy is disabled. Set `DEPLOY_ALLOWED_USERS` in `.env` (Slack user IDs, comma-separated).",
+                text="Deploy is disabled on this host (`DEPLOY_ENABLED=false`).",
             )
             return
-        if not is_deploy_allowed(user_id):
-            respond(response_type="ephemeral", text="You're not allowed to deploy.")
+
+        if not deploy_allowed(user_id):
+            respond(response_type="ephemeral", text="You're not allowed to run deploy.")
             return
-        if not DEPLOY_PATH.is_file():
-            respond(response_type="ephemeral", text=f"Deploy script not found: {DEPLOY_PATH}")
+
+        channel_id = command.get("channel_id") or SLACK_CHANNEL_ID
+        if not channel_id:
+            respond(response_type="ephemeral", text="No channel ID available for deploy status.")
             return
+
+        try:
+            trigger_deploy(channel_id)
+        except FileNotFoundError as err:
+            respond(response_type="ephemeral", text=str(err))
+            return
+
         respond(
             response_type="in_channel",
-            text=":rocket: Deploy started — pulling latest from git...",
+            text=":gear: Deploying — pulling from git and restarting bot + worker...",
         )
-        trigger_deploy()
 
     return app
 
 
 def main() -> None:
     ensure_queue_files()
-    write_bot_pid()
 
     if START_WORKER:
         if not WORKER_PATH.is_file():

@@ -12,7 +12,7 @@ __pycache__/
 # Secrets — copy .env.example to .env instead
 .env
 
-# Runtime pid files
-.bot.pid
-.worker.pid
+# Deploy logs
 deploy.log
+bot.log
+worker.log
