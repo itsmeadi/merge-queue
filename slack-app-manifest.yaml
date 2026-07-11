@@ -12,11 +12,12 @@
 
 display_information:
   name: Merge Queue Bot
-  description: FIFO merge queue for GetStream/chat PRs. /merge · /merge-status · /merge-history · /merge-deploy
-  long_description: |
-    Queue GetStream/chat PRs from Slack. Syncs with base, waits for CI, squash merges when green.
-
-    /merge · /merge-status · /merge-history · /merge-deploy (admin)
+  description: FIFO merge queue for GetStream/chat PRs. Commands - merge, merge-status, merge-history, merge-deploy.
+  long_description: >
+    Queue GetStream/chat pull requests from Slack. Syncs each branch with the base branch,
+    waits for CI on the latest commit, and squash merges when green. Skips PRs that cannot
+    merge and retries flaky CI failures. Commands include merge, merge-status, merge-history,
+    and merge-deploy for admins. For GetStream/chat only.
   background_color: "#0052cc"
 
 features:
