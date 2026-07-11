@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 SLACK_CHANNEL="${1:-${SLACK_CHANNEL_ID:-}}"
+SLACK_MESSAGE_TS="${2:-}"
 DEPLOY_LOG="${SCRIPT_DIR}/deploy.log"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 
@@ -26,14 +27,22 @@ slack_post() {
     return 0
   fi
   local payload resp ok
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"channel": sys.argv[1], "text": sys.argv[2]}))' "$SLACK_CHANNEL" "$text")"
-  resp="$(curl -sS -X POST https://slack.com/api/chat.postMessage \
-    -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
-    -H "Content-type: application/json; charset=utf-8" \
-    -d "$payload")"
+  if [[ -n "$SLACK_MESSAGE_TS" ]]; then
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"channel": sys.argv[1], "ts": sys.argv[2], "text": sys.argv[3]}))' "$SLACK_CHANNEL" "$SLACK_MESSAGE_TS" "$text")"
+    resp="$(curl -sS -X POST https://slack.com/api/chat.update \
+      -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+      -H "Content-type: application/json; charset=utf-8" \
+      -d "$payload")"
+  else
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"channel": sys.argv[1], "text": sys.argv[2]}))' "$SLACK_CHANNEL" "$text")"
+    resp="$(curl -sS -X POST https://slack.com/api/chat.postMessage \
+      -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+      -H "Content-type: application/json; charset=utf-8" \
+      -d "$payload")"
+  fi
   ok="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("ok", False))' <<<"$resp" 2>/dev/null || echo False)"
   if [[ "$ok" != "True" ]]; then
-    log "WARN: failed to post to Slack: $resp"
+    log "WARN: failed to update Slack: $resp"
   fi
 }
 

@@ -188,11 +188,11 @@ def deploy_allowed(user_id: str) -> bool:
     return user_id in DEPLOY_ALLOWED_USER_IDS
 
 
-def trigger_deploy(channel_id: str) -> None:
+def trigger_deploy(channel_id: str, message_ts: str) -> None:
     if not DEPLOY_PATH.is_file():
         raise FileNotFoundError(f"deploy script not found: {DEPLOY_PATH}")
     subprocess.Popen(
-        [str(DEPLOY_PATH), channel_id],
+        [str(DEPLOY_PATH), channel_id, message_ts],
         cwd=INSTALL_DIR,
         env=worker_env(),
         start_new_session=True,
@@ -238,7 +238,7 @@ def create_app() -> App:
         respond(response_type="in_channel", text=build_history_message(count))
 
     @app.command("/merge-deploy")
-    def handle_merge_deploy(ack, respond, command):
+    def handle_merge_deploy(ack, respond, client, command):
         ack()
         user_id = command.get("user_id", "")
 
@@ -258,16 +258,19 @@ def create_app() -> App:
             respond(response_type="ephemeral", text="No channel ID available for deploy status.")
             return
 
-        try:
-            trigger_deploy(channel_id)
-        except FileNotFoundError as err:
-            respond(response_type="ephemeral", text=str(err))
+        if not DEPLOY_PATH.is_file():
+            respond(response_type="ephemeral", text=f"deploy script not found: {DEPLOY_PATH}")
             return
 
-        respond(
-            response_type="in_channel",
+        posted = client.chat_postMessage(
+            channel=channel_id,
             text="Deploying — pulling from git and restarting bot + worker...",
         )
+        if not posted.get("ok"):
+            respond(response_type="ephemeral", text="Failed to post deploy status to Slack.")
+            return
+
+        trigger_deploy(channel_id, posted["ts"])
 
     return app
 
