@@ -439,6 +439,9 @@ main() {
   touch "$PR_SKIPPED_FILE"
   touch "$PR_MERGED_FILE"
 
+  echo $$ >"$SCRIPT_DIR/.worker.pid"
+  trap 'rm -f "$SCRIPT_DIR/.worker.pid"' EXIT
+
   trap cleanup SIGINT SIGTERM
 
   log "Watching $PR_QUEUE_FILE (poll every ${POLL_INTERVAL}s, max retries: $MAX_RETRIES, merge: $MERGE_METHOD)"

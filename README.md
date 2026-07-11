@@ -59,6 +59,7 @@ Keep it running with `tmux`, `screen`, or systemd.
 | `/merge 12345` | Queue a PR (number or full URL) |
 | `/merge-status` | Show current queue |
 | `/merge-history` | Show last 5 completed PRs (optional count, max 50) |
+| `/merge-deploy` | Pull from git and restart bot + worker (authorized users only) |
 
 ## How it works
 
@@ -103,6 +104,8 @@ Worker behavior:
 | `PR_SKIPPED_FILE` | `/srv/stream/merge-queue/prs-skipped.txt` | Skipped PRs (approval, conflict, policy) |
 | `PR_MERGED_FILE` | `/srv/stream/merge-queue/prs-merged.txt` | Successfully merged PRs |
 | `START_WORKER` | `true` | Set `false` to run worker separately |
+| `DEPLOY_ALLOWED_USERS` | — | Slack user IDs allowed to run `/merge-deploy` (comma-separated) |
+| `DEPLOY_GIT_BRANCH` | `main` | Branch to pull on deploy |
 
 ## Skip vs failed
 
@@ -118,6 +121,30 @@ Re-queue a skipped PR after approval:
 
 ```bash
 echo 'https://github.com/GetStream/chat/pull/12345' >> /srv/stream/merge-queue/prs.txt
+```
+
+## Deploy from Slack
+
+Requires a git clone on the host (not a plain `scp` copy).
+
+1. Add your Slack user ID to `.env`:
+   ```bash
+   DEPLOY_ALLOWED_USERS=U0123456789
+   ```
+   Find it: Slack profile → ⋮ → **Copy member ID**
+
+2. Register `/merge-deploy` in the Slack app (manifest or Slash Commands)
+
+3. In Slack:
+   ```
+   /merge-deploy
+   ```
+
+This runs [`deploy.sh`](/Users/aditya/code/merge-queue/deploy.sh): `git pull`, update deps, restart worker + bot. Status posts to `SLACK_CHANNEL_ID`.
+
+Manual deploy on EC2:
+```bash
+cd ~/mergebot && ./deploy.sh
 ```
 
 ## Run worker standalone

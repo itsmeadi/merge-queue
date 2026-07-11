@@ -148,6 +148,19 @@ def format_worker_started(poll_interval: int) -> str:
     return f":robot_face: Merge bot is awake · checking every {poll_interval}s"
 
 
+def format_deploy_started() -> str:
+    return ":rocket: Pulling latest from git..."
+
+
+def format_deploy_success(commit: str, branch: str) -> str:
+    return f":tada: Deployed `{commit}` from `{branch}` · bot and worker restarted"
+
+
+def format_deploy_failed(reason: str) -> str:
+    return f":ghost: Deploy failed — {reason}"
+
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         sys.exit(2)
@@ -163,6 +176,9 @@ def main() -> None:
         "already_done": lambda: format_already_done(args[0], args[1] if len(args) > 1 else "done"),
         "ci_rerun": lambda: format_ci_rerun(args[0], int(args[1]), int(args[2])),
         "worker_started": lambda: format_worker_started(int(args[0])),
+        "deploy_started": lambda: format_deploy_started(),
+        "deploy_success": lambda: format_deploy_success(args[0], args[1] if len(args) > 1 else "main"),
+        "deploy_failed": lambda: format_deploy_failed(args[0] if args else "unknown error"),
     }
 
     if cmd not in messages:

@@ -28,6 +28,12 @@ DEFAULT_REPO = os.environ.get("DEFAULT_REPO", "GetStream/chat")
 SLACK_CHANNEL_ID = os.environ.get("SLACK_CHANNEL_ID", "")
 START_WORKER = os.environ.get("START_WORKER", "true").lower() != "false"
 WORKER_PATH = INSTALL_DIR / "worker.sh"
+DEPLOY_PATH = INSTALL_DIR / "deploy.sh"
+DEPLOY_ALLOWED_USERS = {
+    u.strip()
+    for u in os.environ.get("DEPLOY_ALLOWED_USERS", "").split(",")
+    if u.strip()
+}
 HISTORY_DEFAULT = 5
 HISTORY_MAX = 50
 
@@ -173,6 +179,23 @@ def parse_history_count(text: str) -> int | None:
     return min(count, HISTORY_MAX)
 
 
+def write_bot_pid() -> None:
+    (INSTALL_DIR / ".bot.pid").write_text(str(os.getpid()))
+
+
+def is_deploy_allowed(user_id: str) -> bool:
+    return bool(DEPLOY_ALLOWED_USERS) and user_id in DEPLOY_ALLOWED_USERS
+
+
+def trigger_deploy() -> None:
+    subprocess.Popen(
+        [str(DEPLOY_PATH), "--from-bot"],
+        cwd=INSTALL_DIR,
+        env=worker_env(),
+        start_new_session=True,
+    )
+
+
 def create_app() -> App:
     token = os.environ.get("SLACK_BOT_TOKEN")
     if not token or not os.environ.get("SLACK_APP_TOKEN"):
@@ -211,11 +234,34 @@ def create_app() -> App:
             return
         respond(response_type="in_channel", text=build_history_message(count))
 
+    @app.command("/merge-deploy")
+    def handle_merge_deploy(ack, respond, command):
+        ack()
+        user_id = command.get("user_id", "")
+        if not DEPLOY_ALLOWED_USERS:
+            respond(
+                response_type="ephemeral",
+                text="Deploy is disabled. Set `DEPLOY_ALLOWED_USERS` in `.env` (Slack user IDs, comma-separated).",
+            )
+            return
+        if not is_deploy_allowed(user_id):
+            respond(response_type="ephemeral", text="You're not allowed to deploy.")
+            return
+        if not DEPLOY_PATH.is_file():
+            respond(response_type="ephemeral", text=f"Deploy script not found: {DEPLOY_PATH}")
+            return
+        respond(
+            response_type="in_channel",
+            text=":rocket: Deploy started — pulling latest from git...",
+        )
+        trigger_deploy()
+
     return app
 
 
 def main() -> None:
     ensure_queue_files()
+    write_bot_pid()
 
     if START_WORKER:
         if not WORKER_PATH.is_file():
