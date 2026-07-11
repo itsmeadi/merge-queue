@@ -84,7 +84,9 @@ main() {
   fi
 
   kill_by_pattern "$SCRIPT_DIR/worker.sh"
-  start_worker
+  if [[ "${START_WORKER:-true}" == "false" ]]; then
+    start_worker
+  fi
 
   if [[ "$before" == "$after" ]]; then
     slack_post ":information_source: Deploy done — already up to date (\`$after\`). Restarted bot + worker."
