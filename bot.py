@@ -188,11 +188,11 @@ def deploy_allowed(user_id: str) -> bool:
     return user_id in DEPLOY_ALLOWED_USER_IDS
 
 
-def trigger_deploy(channel_id: str, message_ts: str) -> None:
+def trigger_deploy(response_url: str) -> None:
     if not DEPLOY_PATH.is_file():
         raise FileNotFoundError(f"deploy script not found: {DEPLOY_PATH}")
     subprocess.Popen(
-        [str(DEPLOY_PATH), channel_id, message_ts],
+        [str(DEPLOY_PATH), response_url],
         cwd=INSTALL_DIR,
         env=worker_env(),
         start_new_session=True,
@@ -238,7 +238,7 @@ def create_app() -> App:
         respond(response_type="in_channel", text=build_history_message(count))
 
     @app.command("/merge-deploy")
-    def handle_merge_deploy(ack, respond, client, command):
+    def handle_merge_deploy(ack, respond, command):
         ack()
         user_id = command.get("user_id", "")
 
@@ -253,24 +253,20 @@ def create_app() -> App:
             respond(response_type="ephemeral", text="You're not allowed to run deploy.")
             return
 
-        channel_id = command.get("channel_id") or SLACK_CHANNEL_ID
-        if not channel_id:
-            respond(response_type="ephemeral", text="No channel ID available for deploy status.")
+        response_url = command.get("response_url", "")
+        if not response_url:
+            respond(response_type="ephemeral", text="Missing Slack response URL for deploy status.")
             return
 
         if not DEPLOY_PATH.is_file():
             respond(response_type="ephemeral", text=f"deploy script not found: {DEPLOY_PATH}")
             return
 
-        posted = client.chat_postMessage(
-            channel=channel_id,
+        respond(
+            response_type="in_channel",
             text="Deploying — pulling from git and restarting bot + worker...",
         )
-        if not posted.get("ok"):
-            respond(response_type="ephemeral", text="Failed to post deploy status to Slack.")
-            return
-
-        trigger_deploy(channel_id, posted["ts"])
+        trigger_deploy(response_url)
 
     return app
 

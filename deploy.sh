@@ -5,8 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-SLACK_CHANNEL="${1:-${SLACK_CHANNEL_ID:-}}"
-SLACK_MESSAGE_TS="${2:-}"
+RESPONSE_URL="${1:-}"
 DEPLOY_LOG="${SCRIPT_DIR}/deploy.log"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 
@@ -23,26 +22,17 @@ log() {
 
 slack_post() {
   local text="$1"
-  if [[ -z "${SLACK_BOT_TOKEN:-}" || -z "$SLACK_CHANNEL" ]]; then
+  if [[ -z "$RESPONSE_URL" ]]; then
+    log "WARN: no response_url — cannot update deploy status in Slack"
     return 0
   fi
-  local payload resp ok
-  if [[ -n "$SLACK_MESSAGE_TS" ]]; then
-    payload="$(python3 -c 'import json,sys; print(json.dumps({"channel": sys.argv[1], "ts": sys.argv[2], "text": sys.argv[3]}))' "$SLACK_CHANNEL" "$SLACK_MESSAGE_TS" "$text")"
-    resp="$(curl -sS -X POST https://slack.com/api/chat.update \
-      -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
-      -H "Content-type: application/json; charset=utf-8" \
-      -d "$payload")"
-  else
-    payload="$(python3 -c 'import json,sys; print(json.dumps({"channel": sys.argv[1], "text": sys.argv[2]}))' "$SLACK_CHANNEL" "$text")"
-    resp="$(curl -sS -X POST https://slack.com/api/chat.postMessage \
-      -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
-      -H "Content-type: application/json; charset=utf-8" \
-      -d "$payload")"
-  fi
-  ok="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("ok", False))' <<<"$resp" 2>/dev/null || echo False)"
-  if [[ "$ok" != "True" ]]; then
-    log "WARN: failed to update Slack: $resp"
+  local payload resp
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"replace_original": True, "text": sys.argv[1]}))' "$text")"
+  resp="$(curl -sS -X POST "$RESPONSE_URL" \
+    -H "Content-type: application/json; charset=utf-8" \
+    -d "$payload")"
+  if ! python3 -c 'import json,sys; r=json.loads(sys.argv[1]); sys.exit(0 if r.get("ok") is True else 1)' "$resp" 2>/dev/null; then
+    log "WARN: failed to update deploy message: $resp"
   fi
 }
 
@@ -74,13 +64,13 @@ main() {
     exit 1
   fi
 
-  local before after pull_out=0
+  local before after pull_out
   before="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD)"
   log "Before: $before"
 
   if ! pull_out="$(git -C "$SCRIPT_DIR" pull origin "$DEPLOY_BRANCH" 2>&1)"; then
     log "git pull failed: $pull_out"
-    slack_post "Deploy failed — git pull error:\n\`\`\`$pull_out\`\`\`"
+    slack_post "$(printf 'Deploy failed — git pull error:\n```%s```' "$pull_out")"
     exit 1
   fi
   log "$pull_out"
@@ -97,14 +87,14 @@ main() {
     start_worker
   fi
 
+  kill_by_pattern "$SCRIPT_DIR/bot.py"
+  start_bot
+
   if [[ "$before" == "$after" ]]; then
     slack_post "Deploy done — already up to date (\`$after\`). Restarted bot + worker."
   else
     slack_post "Deploy done — \`$before\` → \`$after\`. Restarted bot + worker."
   fi
-
-  kill_by_pattern "$SCRIPT_DIR/bot.py"
-  start_bot
 
   log "Deploy finished"
 }
