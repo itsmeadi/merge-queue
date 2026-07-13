@@ -58,6 +58,7 @@ Keep it running with `tmux`, `screen`, or systemd.
 | Command | Description |
 |---------|-------------|
 | `/merge 12345` | Queue a PR (number or full URL) |
+| `/merge-queue 12345` | Same as `/merge` |
 | `/merge-status` | Show current queue |
 | `/merge-history` | Show last 5 completed PRs (optional count, max 50) |
 | `/merge-deploy` | Pull from git and restart bot + worker (allowlisted users only) |
@@ -124,6 +125,9 @@ Worker behavior:
 | `CHECK_INTERVAL` | `10` | CI poll interval |
 | `MERGE_METHOD` | `squash` | `merge`, `squash`, or `rebase` |
 | `CI_HEAD_WAIT_MAX` | `3600` | Max seconds to wait for CI on HEAD commit |
+| `CI_SETTLE_AFTER_SYNC` | `45` | Seconds to wait after `update-branch` before trusting CI status |
+| `REQUIRED_CHECK` | `Ready to merge` | Required GitHub check that must pass before merge |
+| `PR_PROCESSING_FILE` | `.../processing.txt` | PR currently being processed (shown in `/merge-status`) |
 | `PR_SKIPPED_FILE` | `/srv/stream/merge-queue/prs-skipped.txt` | Skipped PRs (approval, conflict, policy) |
 | `PR_MERGED_FILE` | `/srv/stream/merge-queue/prs-merged.txt` | Successfully merged PRs |
 | `START_WORKER` | `true` | Set `false` to run worker separately |

@@ -19,6 +19,9 @@ POLL_INTERVAL="${POLL_INTERVAL:-10}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-10}"
 MERGE_METHOD="${MERGE_METHOD:-squash}"
 CI_HEAD_WAIT_MAX="${CI_HEAD_WAIT_MAX:-3600}"
+CI_SETTLE_AFTER_SYNC="${CI_SETTLE_AFTER_SYNC:-45}"
+REQUIRED_CHECK="${REQUIRED_CHECK:-Ready to merge}"
+PR_PROCESSING_FILE="${PR_PROCESSING_FILE:-${MERGE_QUEUE_DIR}/processing.txt}"
 SLACK_BOT_TOKEN="${SLACK_BOT_TOKEN:-}"
 SLACK_CHANNEL_ID="${SLACK_CHANNEL_ID:-}"
 ONCE=false
@@ -43,7 +46,8 @@ Options:
 Environment variables: MERGE_QUEUE_DIR (default: /srv/stream/merge-queue),
 PR_QUEUE_FILE, PR_FAILED_FILE, PR_SKIPPED_FILE, PR_MERGED_FILE, MAX_RETRIES,
 POLL_INTERVAL, CHECK_INTERVAL, MERGE_METHOD (default: squash),
-CI_HEAD_WAIT_MAX, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID
+CI_HEAD_WAIT_MAX, CI_SETTLE_AFTER_SYNC, REQUIRED_CHECK, PR_PROCESSING_FILE,
+SLACK_BOT_TOKEN, SLACK_CHANNEL_ID
 EOF
 }
 
@@ -174,7 +178,42 @@ merge_blocked_reason() {
       return 0
       ;;
   esac
-  if [[ "$merge_state" == "BLOCKED" && "$mergeable" != "MERGEABLE" && "$merge_state" != "BEHIND" ]]; then
+  return 1
+}
+
+# Skip reasons that should abort before waiting for CI (reviews, hard conflicts).
+preflight_blocked_reason() {
+  merge_blocked_reason "$@"
+}
+
+# Block merge attempts while GitHub still reports BLOCKED (pending required checks, etc.).
+merge_attempt_blocked_reason() {
+  local url="$1"
+  local mergeable review merge_state
+
+  mergeable="$(gh pr view "$url" --json mergeable -q .mergeable 2>/dev/null || echo "")"
+  review="$(gh pr view "$url" --json reviewDecision -q .reviewDecision 2>/dev/null || echo "")"
+  merge_state="$(gh pr view "$url" --json mergeStateStatus -q .mergeStateStatus 2>/dev/null || echo "")"
+
+  if [[ "$mergeable" == "CONFLICTING" ]]; then
+    echo "merge conflict"
+    return 0
+  fi
+  case "$review" in
+    REVIEW_REQUIRED)
+      echo "missing approval"
+      return 0
+      ;;
+    CHANGES_REQUESTED)
+      echo "changes requested"
+      return 0
+      ;;
+  esac
+  if [[ "$merge_state" == "BEHIND" ]]; then
+    echo "behind base"
+    return 0
+  fi
+  if [[ "$merge_state" == "BLOCKED" ]]; then
     echo "merge blocked ($merge_state)"
     return 0
   fi
@@ -210,8 +249,23 @@ is_pr_behind() {
   [[ "$(merge_state_status "$1")" == "BEHIND" ]]
 }
 
+required_check_bucket() {
+  local url="$1"
+  gh pr checks "$url" --json name,bucket -q \
+    '.[] | select(.name=="'"$REQUIRED_CHECK"'") | .bucket' 2>/dev/null | head -1
+}
+
+set_processing() {
+  echo "$1" >"$PR_PROCESSING_FILE"
+}
+
+clear_processing() {
+  rm -f "$PR_PROCESSING_FILE"
+}
+
 sync_with_base() {
   local url="$1"
+  local updated=false
 
   if ! is_pr_behind "$url"; then
     log "PR branch is up to date with base"
@@ -223,10 +277,16 @@ sync_with_base() {
     log "update-branch failed (likely merge conflict)"
     return 1
   fi
+  updated=true
 
   if is_pr_behind "$url"; then
     log "PR still behind base after update-branch"
     return 1
+  fi
+
+  if $updated; then
+    log "Waiting ${CI_SETTLE_AFTER_SYNC}s for CI to restart after update-branch"
+    sleep "$CI_SETTLE_AFTER_SYNC"
   fi
 
   log "PR branch synced with base"
@@ -237,7 +297,7 @@ sync_with_base() {
 # Returns 0 if CI passed, 1 on failure/timeout, 2 if PR became BEHIND during wait.
 wait_for_ci_on_head() {
   local url="$1"
-  local oid current_oid waited=0 pending failing
+  local oid current_oid waited=0 pending failing required
 
   oid="$(head_ref_oid "$url")"
   if [[ -z "$oid" || "$oid" == "null" ]]; then
@@ -245,7 +305,7 @@ wait_for_ci_on_head() {
     return 1
   fi
 
-  log "Waiting for CI on HEAD ${oid:0:7} (up to ${CI_HEAD_WAIT_MAX}s)"
+  log "Waiting for CI on HEAD ${oid:0:7} (required check: ${REQUIRED_CHECK}, up to ${CI_HEAD_WAIT_MAX}s)"
 
   while (( waited < CI_HEAD_WAIT_MAX )); do
     if is_pr_behind "$url"; then
@@ -261,6 +321,7 @@ wait_for_ci_on_head() {
 
     pending="$(gh pr checks "$url" --json bucket -q '[.[] | select(.bucket=="pending")] | length' 2>/dev/null || echo 1)"
     failing="$(gh pr checks "$url" --json bucket -q '[.[] | select(.bucket=="fail")] | length' 2>/dev/null || echo 0)"
+    required="$(required_check_bucket "$url")"
 
     if [[ "$pending" -gt 0 ]]; then
       log "CI pending ($pending check(s)) on HEAD ${oid:0:7}..."
@@ -269,17 +330,24 @@ wait_for_ci_on_head() {
       continue
     fi
 
-    if [[ "$failing" -gt 0 ]]; then
-      log "CI failed ($failing check(s)) on HEAD ${oid:0:7}"
+    if [[ -z "$required" || "$required" == "pending" ]]; then
+      log "Waiting for required check '${REQUIRED_CHECK}' on HEAD ${oid:0:7}..."
+      sleep "$CHECK_INTERVAL"
+      waited=$((waited + CHECK_INTERVAL))
+      continue
+    fi
+
+    if [[ "$required" == "fail" || "$failing" -gt 0 ]]; then
+      log "CI failed on HEAD ${oid:0:7} (${REQUIRED_CHECK}=${required}, failing=${failing})"
       return 1
     fi
 
-    if gh pr checks "$url" >/dev/null 2>&1; then
-      log "CI passed on HEAD ${oid:0:7}"
+    if [[ "$required" == "pass" ]]; then
+      log "CI passed on HEAD ${oid:0:7} (${REQUIRED_CHECK} green)"
       return 0
     fi
 
-    log "Waiting for CI checks on HEAD ${oid:0:7}..."
+    log "Waiting for '${REQUIRED_CHECK}' (bucket=${required}) on HEAD ${oid:0:7}..."
     sleep "$CHECK_INTERVAL"
     waited=$((waited + CHECK_INTERVAL))
   done
@@ -310,6 +378,8 @@ process_pr() {
   local retries=0 ci_result
 
   log "Processing $url"
+  set_processing "$url"
+  trap 'clear_processing' RETURN
   slack_post "$(slack_msg processing "$url")"
 
   if ! parse_pr_url "$url"; then
@@ -341,7 +411,7 @@ process_pr() {
   fi
 
   local skip_reason
-  if skip_reason="$(merge_blocked_reason "$url")"; then
+  if skip_reason="$(preflight_blocked_reason "$url")"; then
     skip_pr "$url" "$skip_reason"
     return 0
   fi
@@ -371,9 +441,14 @@ process_pr() {
         continue
       fi
 
-      if skip_reason="$(merge_blocked_reason "$url")"; then
+      if skip_reason="$(merge_attempt_blocked_reason "$url")"; then
         skip_pr "$url" "$skip_reason"
         return 0
+      fi
+
+      if [[ "$(required_check_bucket "$url")" != "pass" ]]; then
+        log "Required check '${REQUIRED_CHECK}' not green after CI wait — retrying"
+        continue
       fi
 
       log "CI passed and PR is up to date — merging"
@@ -438,9 +513,6 @@ main() {
   touch "$PR_FAILED_FILE"
   touch "$PR_SKIPPED_FILE"
   touch "$PR_MERGED_FILE"
-
-  echo $$ >"$SCRIPT_DIR/.worker.pid"
-  trap 'rm -f "$SCRIPT_DIR/.worker.pid"' EXIT
 
   trap cleanup SIGINT SIGTERM
 

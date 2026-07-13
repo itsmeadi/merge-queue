@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Slack message formatters for the merge queue bot and worker."""
+"""Cute Slack message formatters for the merge queue bot and worker."""
 
 from __future__ import annotations
 
@@ -10,12 +10,9 @@ from datetime import datetime
 PR_NUMBER_RE = re.compile(r"/pull/(\d+)")
 
 
-def pr_link(url: str) -> str:
-    """Slack link: <url|#12345>"""
+def pr_label(url: str) -> str:
     match = PR_NUMBER_RE.search(url)
-    if match:
-        return f"<{url}|#{match.group(1)}>"
-    return url
+    return f"#{match.group(1)}" if match else url
 
 
 def format_time(dt: datetime) -> str:
@@ -25,29 +22,50 @@ def format_time(dt: datetime) -> str:
     return f"{dt.strftime('%b')} {dt.day}, {hour}:{minute}{ampm}"
 
 
-def friendly_reason(raw: str, outcome: str = "") -> str:
+def cute_reason(raw: str, outcome: str = "") -> str:
     text = (raw or "").strip().lower()
     if not text:
         if outcome == "merged":
-            return "merged"
+            return "merged and done"
         return outcome or "unknown"
 
     rules = [
-        (("merge conflict", "conflicting"), "merge conflict"),
-        (("missing approval", "review_required"), "missing approval"),
-        (("changes requested",), "changes requested"),
-        (("merge blocked", "blocked"), "merge blocked"),
-        (("malformed url",), "malformed URL"),
-        (("gh pr view", "could not fetch"), "PR not found"),
-        (("ci failed and could not rerun",), "CI failed, could not rerun"),
-        (("ci failed",), "CI failed"),
-        (("merge failed",), "merge failed"),
-        (("merged",), "merged"),
+        (("merge conflict", "conflicting"), "bumped into a conflict"),
+        (("missing approval", "review_required"), "still needs a thumbs-up"),
+        (("changes requested",), "reviewer wants changes"),
+        (("merge blocked", "blocked"), "merge is blocked"),
+        (("malformed url",), "that URL looks funny"),
+        (("gh pr view", "could not fetch"), "couldn't find that PR"),
+        (("ci failed and could not rerun",), "CI failed and couldn't rerun"),
+        (("ci failed",), "CI said nope"),
+        (("merge failed",), "merge didn't work out"),
+        (("merged",), "merged and done"),
     ]
     for needles, label in rules:
         if any(n in text for n in needles):
             return label
     return raw.strip()
+
+
+def reason_emoji(outcome: str, reason: str = "") -> str:
+    text = (reason or "").lower()
+    if outcome == "merged" or "merged" in text:
+        return ":tada:"
+    if any(x in text for x in ("merge conflict", "conflicting", "conflict")):
+        return ":collision:"
+    if any(x in text for x in ("missing approval", "review_required")):
+        return ":wave:"
+    if "changes requested" in text:
+        return ":memo:"
+    if "ci failed" in text or "ci said" in text:
+        return ":repeat:"
+    if any(x in text for x in ("malformed", "gh pr view", "could not fetch", "couldn't find")):
+        return ":ghost:"
+    if outcome == "skipped":
+        return ":rabbit2:"
+    if outcome == "failed":
+        return ":sweat_smile:"
+    return ":grey_question:"
 
 
 def format_history_entry(
@@ -56,15 +74,17 @@ def format_history_entry(
     outcome: str,
     reason: str = "",
 ) -> str:
-    detail = friendly_reason(reason, outcome)
+    emoji = reason_emoji(outcome, reason)
+    label = pr_label(url)
+    detail = cute_reason(reason, outcome)
     when = format_time(timestamp)
-    return f"• {pr_link(url)} · {detail} · {when}"
+    return f"• {emoji} {label} · {detail} · {when}"
 
 
 def format_history_lines(entries: list[tuple[datetime, str, str, str]], n: int) -> str:
-    lines = [f"*Merge queue history* (last {n})"]
+    lines = [f":bunny: *Queue diary* · last {n}"]
     if not entries:
-        lines.append("_No completed PRs yet_")
+        lines.append("_Nothing finished yet — queue is waiting for its first story_")
         return "\n".join(lines)
 
     for timestamp, url, outcome, reason in entries:
@@ -72,57 +92,76 @@ def format_history_lines(entries: list[tuple[datetime, str, str, str]], n: int) 
     return "\n".join(lines)
 
 
-def format_queue_status(queue: list[str], failed_count: int, skipped_count: int) -> str:
-    lines = ["*Merge queue*"]
-    if not queue:
-        lines.append("_Queue is empty_")
+def format_queue_status(
+    queue: list[str],
+    failed_count: int,
+    skipped_count: int,
+    processing_url: str = "",
+) -> str:
+    lines = [":clipboard: *Who's in line?*"]
+    if processing_url:
+        lines.append(f":hourglass_flowing_sand: {pr_label(processing_url)} · merging now")
+    waiting = [url for url in queue if url != processing_url]
+    if not waiting and not processing_url:
+        lines.append("_Queue is empty — all quiet_")
     else:
-        for i, url in enumerate(queue):
-            if i == 0:
-                lines.append(f"{pr_link(url)} · up next")
+        for i, url in enumerate(waiting):
+            label = pr_label(url)
+            if i == 0 and not processing_url:
+                lines.append(f":rabbit2: {label} · up next!")
             else:
-                lines.append(f"{i + 1}. {pr_link(url)}")
-    lines.append(f"\n_{len(queue)} queued · {failed_count} failed · {skipped_count} skipped_")
+                lines.append(f"   {i + 1}. {label}")
+    lines.append(f"\n_{len(queue)} waiting · {failed_count} failed · {skipped_count} skipped_")
     return "\n".join(lines)
 
 
-def format_queued(url: str, position: int, added: bool) -> str:
-    link = pr_link(url)
+def format_queued(url: str, position: int, added: bool, queue: list[str] | None = None) -> str:
+    label = pr_label(url)
     if added:
         if position == 1:
-            return f"Queued {link} · up next"
-        return f"Queued {link} · position {position}"
-    return f"Already queued {link} · position {position}"
+            headline = f":rabbit2: {label} · queued · you're up next!"
+        else:
+            headline = f":rabbit2: {label} · queued · spot {position} in line"
+    else:
+        headline = f":rabbit2: {label} · already in line (spot {position})"
+
+    lines = [headline]
+    if queue:
+        lines.append("")
+        lines.append(format_queue_status(queue, 0, 0))
+    return "\n".join(lines)
 
 
 # --- Worker notification formatters ---
 
 def format_skip(url: str, reason: str) -> str:
-    return f"Skipped {pr_link(url)} · {friendly_reason(reason, 'skipped')}"
+    emoji = reason_emoji("skipped", reason)
+    return f"{emoji} {pr_label(url)} · {cute_reason(reason, 'skipped')}"
 
 
 def format_merged(url: str) -> str:
-    return f"Merged {pr_link(url)}"
+    return f":tada: {pr_label(url)} · merged and done!"
 
 
 def format_failed(url: str, reason: str) -> str:
-    return f"Failed {pr_link(url)} · {friendly_reason(reason, 'failed')}"
+    emoji = reason_emoji("failed", reason)
+    return f"{emoji} {pr_label(url)} · {cute_reason(reason, 'failed')}"
 
 
 def format_processing(url: str) -> str:
-    return f"Processing {pr_link(url)} · syncing with base..."
+    return f":hourglass_flowing_sand: {pr_label(url)} · syncing with base..."
 
 
 def format_already_done(url: str, state: str) -> str:
-    return f"{pr_link(url)} · already {state.lower()}, removed from queue"
+    return f":information_source: {pr_label(url)} · already {state.lower()}, removed from queue"
 
 
 def format_ci_rerun(url: str, attempt: int, max_attempts: int) -> str:
-    return f"{pr_link(url)} · CI failed, retry {attempt}/{max_attempts}..."
+    return f":repeat: {pr_label(url)} · CI hiccup, retry {attempt}/{max_attempts}..."
 
 
 def format_worker_started(poll_interval: int) -> str:
-    return f"Merge queue worker started · polling every {poll_interval}s"
+    return f":robot_face: Merge bot is awake · checking every {poll_interval}s"
 
 
 def main() -> None:

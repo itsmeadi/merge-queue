@@ -18,7 +18,7 @@ display_information:
 
     Skips PRs that cannot merge and retries flaky CI failures.
 
-    Commands: merge, merge-status, merge-history, merge-deploy (admin only).
+    Commands: merge, merge-queue, merge-status, merge-history, merge-deploy (admin only).
 
     For GetStream/chat only.
   background_color: "#0052cc"
@@ -30,6 +30,10 @@ features:
   slash_commands:
     - command: /merge
       description: Add a PR to the merge queue
+      usage_hint: "12345 or https://github.com/GetStream/chat/pull/12345"
+      should_escape: false
+    - command: /merge-queue
+      description: Add a PR to the merge queue (alias)
       usage_hint: "12345 or https://github.com/GetStream/chat/pull/12345"
       should_escape: false
     - command: /merge-status

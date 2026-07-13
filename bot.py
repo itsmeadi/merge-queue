@@ -24,6 +24,7 @@ PR_QUEUE_FILE = Path(os.environ.get("PR_QUEUE_FILE", QUEUE_DATA_DIR / "prs.txt")
 PR_FAILED_FILE = Path(os.environ.get("PR_FAILED_FILE", QUEUE_DATA_DIR / "prs-failed.txt"))
 PR_SKIPPED_FILE = Path(os.environ.get("PR_SKIPPED_FILE", QUEUE_DATA_DIR / "prs-skipped.txt"))
 PR_MERGED_FILE = Path(os.environ.get("PR_MERGED_FILE", QUEUE_DATA_DIR / "prs-merged.txt"))
+PR_PROCESSING_FILE = Path(os.environ.get("PR_PROCESSING_FILE", QUEUE_DATA_DIR / "processing.txt"))
 DEFAULT_REPO = os.environ.get("DEFAULT_REPO", "GetStream/chat")
 SLACK_CHANNEL_ID = os.environ.get("SLACK_CHANNEL_ID", "")
 START_WORKER = os.environ.get("START_WORKER", "true").lower() != "false"
@@ -128,7 +129,33 @@ def build_queue_status_message() -> str:
     queue = read_queue()
     failed = [line for line in PR_FAILED_FILE.read_text().splitlines() if line.strip()] if PR_FAILED_FILE.exists() else []
     skipped = [line for line in PR_SKIPPED_FILE.read_text().splitlines() if line.strip()] if PR_SKIPPED_FILE.exists() else []
-    return format_queue_status(queue, len(failed), len(skipped))
+    return format_queue_status(queue, len(failed), len(skipped), read_processing())
+
+
+def read_processing() -> str:
+    if not PR_PROCESSING_FILE.exists():
+        return ""
+    return PR_PROCESSING_FILE.read_text().strip()
+
+
+def handle_merge_command(respond, text: str) -> None:
+    url = normalize_pr_input(text)
+    if not url:
+        respond(
+            response_type="ephemeral",
+            text=(
+                "Usage: `/merge 12345` or `/merge-queue 12345` "
+                f"or `/merge https://github.com/{DEFAULT_REPO}/pull/12345`"
+            ),
+        )
+        return
+
+    added, position = append_to_queue(url)
+    queue = read_queue()
+    respond(
+        response_type="in_channel",
+        text=format_queued(url, position, added, queue),
+    )
 
 
 def worker_env() -> dict[str, str]:
@@ -209,16 +236,12 @@ def create_app() -> App:
     @app.command("/merge")
     def handle_merge(ack, respond, command):
         ack()
-        url = normalize_pr_input(command.get("text", ""))
-        if not url:
-            respond(
-                response_type="ephemeral",
-                text="Usage: `/merge 12345` or `/merge https://github.com/GetStream/chat/pull/12345`",
-            )
-            return
+        handle_merge_command(respond, command.get("text", ""))
 
-        added, position = append_to_queue(url)
-        respond(response_type="in_channel", text=format_queued(url, position, added))
+    @app.command("/merge-queue")
+    def handle_merge_queue(ack, respond, command):
+        ack()
+        handle_merge_command(respond, command.get("text", ""))
 
     @app.command("/merge-status")
     def handle_merge_status(ack, respond, command):
