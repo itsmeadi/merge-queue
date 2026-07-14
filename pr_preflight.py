@@ -77,6 +77,42 @@ def check_pr_preflight(url: str, timeout: int = 15) -> PreflightResult:
     return _evaluate_pr(data)
 
 
+def fetch_pr_meta(url: str, timeout: int = 15) -> tuple[str, str]:
+    """Return (title, author login) from GitHub; empty strings on failure."""
+    try:
+        result = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "view",
+                url,
+                "--json",
+                "title,author",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "", ""
+
+    if result.returncode != 0:
+        return "", ""
+
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return "", ""
+
+    if not isinstance(data, dict):
+        return "", ""
+
+    title = str(data.get("title") or "").strip()
+    author = _author_login(data)
+    return title, author
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         sys.exit(2)

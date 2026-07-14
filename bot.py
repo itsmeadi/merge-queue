@@ -32,7 +32,7 @@ from messages import (
 )
 from pr_extract import extract_pr_urls
 from pr_preflight import check_pr_preflight
-from queue_meta import build_meta_map, lookup_pr_meta, lookup_user_id, save_pr_meta, save_requester, save_thread
+from queue_meta import build_meta_map_with_fallback, lookup_pr_meta, lookup_user_id, save_pr_meta, save_requester, save_thread
 from slack_notify import dm_user
 from queue_ops import append_to_queue as _append_to_queue
 from queue_ops import remove_from_queue as _remove_from_queue
@@ -142,7 +142,7 @@ def read_recent_history(n: int) -> list[HistoryEntry]:
 def build_history_message(n: int) -> str:
     entries = read_recent_history(n)
     urls = [entry.url for entry in entries]
-    meta = build_meta_map(PR_THREADS_FILE, urls)
+    meta = build_meta_map_with_fallback(PR_THREADS_FILE, urls)
     rows = [(entry.timestamp, entry.url, entry.outcome, entry.reason) for entry in entries]
     return format_history_lines(rows, n, meta)
 

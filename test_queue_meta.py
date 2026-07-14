@@ -6,9 +6,11 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from queue_meta import (
     build_meta_map,
+    build_meta_map_with_fallback,
     clear_thread,
     lookup_pr_meta,
     lookup_user_id,
@@ -61,6 +63,23 @@ class QueueMetaTest(unittest.TestCase):
         save_pr_meta(self.path, URL, "Add feeds translation", "aditya")
         meta = build_meta_map(self.path, [URL])
         self.assertEqual(meta[URL], ("Add feeds translation", "aditya"))
+
+    @patch("pr_preflight.fetch_pr_meta")
+    def test_build_meta_map_with_fallback_fetches_missing(self, fetch_mock: unittest.mock.Mock) -> None:
+        fetch_mock.return_value = ("Fetched title", "octocat")
+        meta = build_meta_map_with_fallback(self.path, [URL])
+        self.assertEqual(meta[URL], ("Fetched title", "octocat"))
+        fetch_mock.assert_called_once_with(URL)
+        title, author = lookup_pr_meta(self.path, URL)
+        self.assertEqual(title, "Fetched title")
+        self.assertEqual(author, "octocat")
+
+    @patch("pr_preflight.fetch_pr_meta")
+    def test_build_meta_map_with_fallback_skips_cached(self, fetch_mock: unittest.mock.Mock) -> None:
+        save_pr_meta(self.path, URL, "Cached title", "aditya")
+        meta = build_meta_map_with_fallback(self.path, [URL])
+        self.assertEqual(meta[URL], ("Cached title", "aditya"))
+        fetch_mock.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
-from pr_preflight import PreflightResult, _evaluate_pr, check_pr_preflight
+from pr_preflight import PreflightResult, _evaluate_pr, check_pr_preflight, fetch_pr_meta
 
 URL = "https://github.com/GetStream/chat/pull/14699"
 
@@ -135,6 +135,27 @@ class CheckPrPreflightTest(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.title, "Add feeds translation")
         self.assertEqual(result.author, "aditya")
+
+
+class FetchPrMetaTest(unittest.TestCase):
+    @patch("pr_preflight.subprocess.run")
+    def test_fetch_title_and_author(self, run_mock: unittest.mock.Mock) -> None:
+        run_mock.return_value = _completed(
+            json.dumps(
+                {
+                    "title": "Add feeds translation",
+                    "author": {"login": "aditya"},
+                }
+            )
+        )
+        title, author = fetch_pr_meta(URL)
+        self.assertEqual(title, "Add feeds translation")
+        self.assertEqual(author, "aditya")
+
+    @patch("pr_preflight.subprocess.run")
+    def test_fetch_failure_returns_empty(self, run_mock: unittest.mock.Mock) -> None:
+        run_mock.return_value = _completed("", returncode=1)
+        self.assertEqual(fetch_pr_meta(URL), ("", ""))
 
 
 if __name__ == "__main__":

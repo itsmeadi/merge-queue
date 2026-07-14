@@ -82,6 +82,26 @@ def build_meta_map(path: Path, urls: list[str]) -> dict[str, tuple[str, str]]:
     return meta
 
 
+def build_meta_map_with_fallback(path: Path, urls: list[str]) -> dict[str, tuple[str, str]]:
+    """Load cached meta; fetch missing title/author from GitHub and persist."""
+    from pr_preflight import fetch_pr_meta
+
+    meta = build_meta_map(path, urls)
+    for url in urls:
+        if not url:
+            continue
+        title, author = meta.get(url, ("", ""))
+        if title and author:
+            continue
+        fetched_title, fetched_author = fetch_pr_meta(url)
+        title = title or fetched_title
+        author = author or fetched_author
+        if title or author:
+            meta[url] = (title, author)
+            save_pr_meta(path, url, title, author)
+    return meta
+
+
 def clear_thread(path: Path, url: str) -> None:
     data = load_threads(path)
     if url not in data:
