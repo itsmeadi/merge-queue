@@ -86,7 +86,7 @@ def format_history_entry(
 
 
 def format_history_lines(entries: list[tuple[datetime, str, str, str]], n: int) -> str:
-    lines = [f":bunny: *Queue diary* · last {n}"]
+    lines = [f":scroll: *Queue diary* · last {n}"]
     if not entries:
         lines.append("_Nothing finished yet — queue is waiting for its first story_")
         return "\n".join(lines)
