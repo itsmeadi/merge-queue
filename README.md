@@ -9,6 +9,7 @@ Queue PRs via Slack → sync with master → wait for CI (rerun on failure) → 
 ```
 merge-queue/
 ├── bot.py                  # Slack bot (Socket Mode)
+├── pr_extract.py           # PR URL extraction from Slack messages
 ├── worker.sh               # Merge worker (gh CLI)
 ├── deploy.sh               # git pull + restart (for /merge-deploy)
 ├── start.sh                # One-command startup
@@ -20,15 +21,6 @@ merge-queue/
 ```
 
 Runtime files (created automatically): `prs.txt`, `prs-failed.txt`, `prs-skipped.txt`, `prs-merged.txt`, `.venv/`
-
-**Agent / CLI enqueue** (same preflight + queue as Slack `/merge`):
-
-```bash
-python3 enqueue.py 12345
-python3 enqueue.py https://github.com/GetStream/chat/pull/12345 --json
-```
-
-Used by the chat repo `pr-monitor` skill via SSH to the merge-bot host.
 
 ## Prerequisites on the host
 
@@ -61,6 +53,8 @@ Keep it running with `tmux`, `screen`, or systemd.
 3. Install App → copy `xoxb-...` bot token
 4. Upload app icon: `icon-256.png` or `icon.png` (Basic Information → App Icon)
 5. `/invite @merge-bot` in your channel
+6. **Custom emojis** (workspace admin): upload `icon-256.png` as `:merge_bot:` and a green “merged” badge as `:merged:` (see [Emoji reactions](#emoji-reactions))
+7. After manifest updates: **reinstall the app** so new scopes/events apply
 
 ## Slack commands
 
@@ -71,6 +65,24 @@ Keep it running with `tmux`, `screen`, or systemd.
 | `/merge-status` | Show current queue |
 | `/merge-history` | Show last 5 completed PRs (optional count, max 50) |
 | `/merge-deploy` | Pull from git and restart bot + worker (allowlisted users only) |
+
+## Emoji reactions
+
+React with **`:merge_bot:`** on any message that contains a `GetStream/chat` PR link (GitHub notifications, pasted URLs, etc.) to queue it — same preflight as `/merge`.
+
+| Emoji | Who | When |
+|-------|-----|------|
+| `:merge_bot:` | You | Queue the PR |
+| `:white_check_mark:` | Bot | Queued successfully |
+| `:x:` | Bot | Preflight rejected |
+| `:ghost:` | Bot | No PR link found in message |
+| `:merged:` | Bot | PR squash-merged (on the original message) |
+
+Upload custom emojis: Slack → **Customize workspace** → **Add custom emoji**
+- `:merge_bot:` — use `icon-256.png` (same as the app icon)
+- `:merged:` — use a green “merged” badge (add your own `emoji-merged.png`)
+
+Configure in `.env` if names differ: `MERGE_REACTION_EMOJI`, `MERGED_REACTION_EMOJI`.
 
 ## Deploy from Slack
 
@@ -146,6 +158,9 @@ Worker behavior:
 | `DEPLOY_ENABLED` | `false` | Enable `/merge-deploy` |
 | `DEPLOY_ALLOWED_USER_IDS` | — | Comma-separated Slack user IDs allowed to deploy |
 | `DEPLOY_BRANCH` | `main` | Branch to pull on deploy |
+| `MERGE_REACTION_EMOJI` | `merge_bot` | Custom emoji name to react with and queue a PR |
+| `MERGED_REACTION_EMOJI` | `merged` | Custom emoji bot adds to source message when PR merges |
+| `MERGE_REACTION_ACK` | `true` | Bot adds ack reactions on emoji enqueue |
 
 ## Skip vs failed
 

@@ -23,8 +23,10 @@ from messages import (
     format_preflight_reject,
     format_queue_status,
     format_queued,
+    format_reaction_no_pr,
     pr_label,
 )
+from pr_extract import extract_pr_urls
 from pr_preflight import check_pr_preflight
 from queue_meta import save_thread
 
@@ -49,6 +51,11 @@ WORKER_PATH = INSTALL_DIR / "worker.sh"
 DEPLOY_PATH = INSTALL_DIR / "deploy.sh"
 HISTORY_DEFAULT = 5
 HISTORY_MAX = 50
+MERGE_REACTION_EMOJI = os.environ.get("MERGE_REACTION_EMOJI", "merge_bot")
+MERGE_REACTION_ACK = os.environ.get("MERGE_REACTION_ACK", "true").lower() != "false"
+REACTION_ACK_OK = "white_check_mark"
+REACTION_ACK_FAIL = "x"
+REACTION_ACK_NO_PR = "ghost"
 
 PR_URL_RE = re.compile(r"github\.com/[^/]+/[^/]+/pull/\d+")
 HISTORY_LINE_RE = re.compile(
@@ -225,6 +232,106 @@ def handle_merge_command(
     threading.Thread(target=save_thread_async, daemon=True).start()
 
 
+def slack_add_reaction(client: Any, channel_id: str, timestamp: str, emoji: str) -> None:
+    try:
+        client.reactions_add(channel=channel_id, timestamp=timestamp, name=emoji)
+    except SlackApiError as exc:
+        print(f"WARN: reactions_add failed ({emoji}): {exc}", file=sys.stderr)
+
+
+def slack_post_thread(client: Any, channel_id: str, thread_ts: str, text: str) -> None:
+    try:
+        client.chat_postMessage(channel=channel_id, thread_ts=thread_ts, text=text)
+    except SlackApiError as exc:
+        print(f"WARN: chat_postMessage failed: {exc}", file=sys.stderr)
+
+
+def fetch_message(client: Any, channel_id: str, message_ts: str) -> dict[str, Any] | None:
+    try:
+        result = client.conversations_history(
+            channel=channel_id,
+            latest=message_ts,
+            limit=1,
+            inclusive=True,
+        )
+    except SlackApiError as exc:
+        print(f"WARN: could not fetch message for reaction: {exc}", file=sys.stderr)
+        return None
+    messages = result.get("messages") or []
+    return messages[0] if messages else None
+
+
+def handle_merge_reaction(client: Any, event: dict[str, Any]) -> None:
+    if event.get("reaction") != MERGE_REACTION_EMOJI:
+        return
+
+    item = event.get("item") or {}
+    if item.get("type") != "message":
+        return
+
+    channel_id = item.get("channel", "")
+    message_ts = item.get("ts", "")
+    if not channel_id or not message_ts:
+        return
+
+    try:
+        auth = client.auth_test()
+        bot_user_id = auth["user_id"]
+    except SlackApiError as exc:
+        print(f"WARN: auth_test failed in reaction handler: {exc}", file=sys.stderr)
+        return
+
+    if event.get("user") == bot_user_id:
+        return
+
+    msg = fetch_message(client, channel_id, message_ts)
+    if not msg:
+        return
+
+    urls = extract_pr_urls(msg, default_repo=DEFAULT_REPO)
+    if not urls:
+        if MERGE_REACTION_ACK:
+            slack_add_reaction(client, channel_id, message_ts, REACTION_ACK_NO_PR)
+        slack_post_thread(client, channel_id, message_ts, format_reaction_no_pr())
+        return
+
+    url = urls[0]
+    if len(urls) > 1:
+        slack_post_thread(
+            client,
+            channel_id,
+            message_ts,
+            f":information_source: found {len(urls)} PR links — queuing {pr_label(url)}",
+        )
+
+    preflight = check_pr_preflight(url)
+    if not preflight.ok:
+        if MERGE_REACTION_ACK:
+            slack_add_reaction(client, channel_id, message_ts, REACTION_ACK_FAIL)
+        slack_post_thread(
+            client,
+            channel_id,
+            message_ts,
+            format_preflight_reject(url, preflight.reason),
+        )
+        return
+
+    added, position = append_to_queue(url)
+    save_thread(PR_THREADS_FILE, url, channel_id, message_ts)
+    queue = read_queue()
+    message = format_queued(
+        url,
+        position,
+        added,
+        queue,
+        read_processing(),
+        preflight.title,
+    )
+    if MERGE_REACTION_ACK:
+        slack_add_reaction(client, channel_id, message_ts, REACTION_ACK_OK)
+    slack_post_thread(client, channel_id, message_ts, message)
+
+
 def worker_env() -> dict[str, str]:
     env = os.environ.copy()
     env.update(
@@ -236,6 +343,7 @@ def worker_env() -> dict[str, str]:
             "PR_MERGED_FILE": str(PR_MERGED_FILE),
             "PR_THREADS_FILE": str(PR_THREADS_FILE),
             "SLACK_CHANNEL_ID": SLACK_CHANNEL_ID,
+            "MERGED_REACTION_EMOJI": os.environ.get("MERGED_REACTION_EMOJI", "merged"),
         }
     )
     return env
@@ -368,6 +476,14 @@ def create_app() -> App:
             text="Deploying — pulling from git and restarting bot + worker...",
         )
         trigger_deploy(response_url)
+
+    @app.event("reaction_added")
+    def handle_reaction_added(event, client):
+        threading.Thread(
+            target=handle_merge_reaction,
+            args=(client, event),
+            daemon=True,
+        ).start()
 
     return app
 

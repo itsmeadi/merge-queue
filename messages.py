@@ -198,6 +198,10 @@ def format_preflight_reject(url: str, reason: str) -> str:
     return f":no_entry: {pr_link(url)} · not queued · {cute_reason(reason)}"
 
 
+def format_reaction_no_pr() -> str:
+    return ":ghost: couldn't find a PR link in this message — use `/merge 14699`"
+
+
 def format_failed(url: str, reason: str) -> str:
     emoji = reason_emoji("failed", reason)
     return f"{emoji} {pr_link(url)} · {cute_reason(reason, 'failed')}"

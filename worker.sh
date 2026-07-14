@@ -25,6 +25,7 @@ REQUIRED_CHECK="${REQUIRED_CHECK:-Ready to merge}"
 PR_PROCESSING_FILE="${PR_PROCESSING_FILE:-${MERGE_QUEUE_DIR}/processing.txt}"
 SLACK_BOT_TOKEN="${SLACK_BOT_TOKEN:-}"
 SLACK_CHANNEL_ID="${SLACK_CHANNEL_ID:-}"
+MERGED_REACTION_EMOJI="${MERGED_REACTION_EMOJI:-merged}"
 ONCE=false
 
 usage() {
@@ -48,7 +49,7 @@ Environment variables: MERGE_QUEUE_DIR (default: install dir, same as this scrip
 PR_QUEUE_FILE, PR_FAILED_FILE, PR_SKIPPED_FILE, PR_MERGED_FILE, MAX_RETRIES,
 POLL_INTERVAL, CHECK_INTERVAL, MERGE_METHOD (default: squash),
 CI_HEAD_WAIT_MAX, CI_SETTLE_AFTER_SYNC, REQUIRED_CHECK, PR_PROCESSING_FILE,
-SLACK_BOT_TOKEN, SLACK_CHANNEL_ID
+SLACK_BOT_TOKEN, SLACK_CHANNEL_ID, MERGED_REACTION_EMOJI
 EOF
 }
 
@@ -99,6 +100,35 @@ slack_post() {
   ok="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("ok", False))' <<<"$resp" 2>/dev/null || echo False)"
   if [[ "$ok" != "True" ]]; then
     log "WARN: failed to post to Slack: $resp"
+  fi
+}
+
+slack_react() {
+  local channel="$1"
+  local ts="$2"
+  local emoji="$3"
+  if [[ -z "$SLACK_BOT_TOKEN" || -z "$channel" || -z "$ts" || -z "$emoji" ]]; then
+    return 0
+  fi
+  local payload resp ok
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"channel": sys.argv[1], "timestamp": sys.argv[2], "name": sys.argv[3]}))' "$channel" "$ts" "$emoji")"
+  resp="$(curl -sS -X POST https://slack.com/api/reactions.add \
+    -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+    -H "Content-type: application/json; charset=utf-8" \
+    -d "$payload")"
+  ok="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("ok", False))' <<<"$resp" 2>/dev/null || echo False)"
+  if [[ "$ok" != "True" ]]; then
+    log "WARN: failed to add reaction ${emoji}: $resp"
+  fi
+}
+
+slack_react_for_pr() {
+  local url="$1"
+  local emoji="${2:-$MERGED_REACTION_EMOJI}"
+  local channel thread_ts
+  read -r channel thread_ts < <(lookup_thread "$url")
+  if [[ -n "$channel" && -n "$thread_ts" ]]; then
+    slack_react "$channel" "$thread_ts" "$emoji"
   fi
 }
 
@@ -502,6 +532,7 @@ process_pr() {
       if merge_out="$(gh pr merge "$url" "$(merge_flag)" 2>&1)"; then
         log "Merged $url"
         append_merged "$url"
+        slack_react_for_pr "$url"
         slack_post "$(slack_msg merged "$url")"
         remove_from_queue "$url"
       elif classify_merge_error "$merge_out"; then
