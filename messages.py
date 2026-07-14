@@ -106,7 +106,7 @@ def _format_queue_lines(
 
     if processing_url:
         position += 1
-        lines.append(f"{position}. :gear: {pr_link(processing_url)} · processing")
+        lines.append(f"{position}. :loading: {pr_link(processing_url)} · processing")
 
     for url in queue:
         if url == processing_url:
