@@ -20,6 +20,8 @@ display_information:
 
     Commands: merge, merge-queue, merge-status, merge-history, merge-deploy (admin only).
 
+    Source: [github.com/itsmeadi/merge-queue](https://github.com/itsmeadi/merge-queue)
+
     For GetStream/chat only.
   background_color: "#0052cc"
 
