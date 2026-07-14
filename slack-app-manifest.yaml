@@ -14,26 +14,15 @@ display_information:
   name: Merge Queue Bot
   description: FIFO merge queue for GetStream/chat — queue PRs, sync with base, wait for CI, squash merge.
   long_description: |
-    Merge Queue Bot queues pull requests for [GetStream/chat](https://github.com/GetStream/chat).
+    Merge Queue Bot queues pull requests for [GetStream/chat](https://github.com/GetStream/chat). Queue a PR from Slack and the worker handles the rest: sync with base, wait for CI on the latest commit, squash merge when green.
 
-    Queue a PR from Slack and the worker handles the rest: sync with base, wait for CI on the latest commit, squash merge when green.
+    One PR at a time — no merge-from-master stampede. Syncs with base via gh pr update-branch when behind. Waits for Ready to merge on the current HEAD. Skips conflicts, missing approval, and branch policy. Retries flaky CI up to 3 times and posts failure details in thread.
 
-    How it works
-    - One PR processed at a time — no merge-from-master stampede
-    - Syncs with base via gh pr update-branch when the branch is behind
-    - Waits for the Ready to merge check on the current HEAD (ignores stale greens)
-    - Skips PRs that cannot merge: conflicts, missing approval, branch policy
-    - Retries flaky CI (up to 3 attempts) and posts failure details in thread
+    Commands: /merge, /merge-queue, /merge-status, /merge-history, /merge-deploy (admins only).
 
-    Commands
-    - /merge or /merge-queue — add a PR by number or URL
-    - /merge-status — current queue and what's processing
-    - /merge-history — recent merged, skipped, and failed PRs
-    - /merge-deploy — pull latest code and restart bot + worker (admins only)
+    Bot source: [github.com/itsmeadi/merge-queue](https://github.com/itsmeadi/merge-queue)
 
-    Links
-    - Bot source: [github.com/itsmeadi/merge-queue](https://github.com/itsmeadi/merge-queue)
-    - Target repo: [GetStream/chat](https://github.com/GetStream/chat)
+    Target repo: [GetStream/chat](https://github.com/GetStream/chat)
   background_color: "#0052cc"
 
 features:
