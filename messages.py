@@ -45,6 +45,8 @@ def cute_reason(raw: str, outcome: str = "") -> str:
         (("ci failed",), "CI said nope"),
         (("merge failed",), "merge didn't work out"),
         (("merged",), "merged and done"),
+        (("already merged",), "already merged"),
+        (("already closed",), "already closed"),
     ]
     for needles, label in rules:
         if any(n in text for n in needles):
@@ -55,7 +57,7 @@ def cute_reason(raw: str, outcome: str = "") -> str:
 def reason_emoji(outcome: str, reason: str = "") -> str:
     text = (reason or "").lower()
     if outcome == "merged" or "merged" in text:
-        return ":tada:"
+        return ":white_check_mark:"
     if any(x in text for x in ("merge conflict", "conflicting", "conflict")):
         return ":collision:"
     if any(x in text for x in ("missing approval", "review_required")):
@@ -126,7 +128,7 @@ def format_queue_status(
     skipped_count: int,
     processing_url: str = "",
 ) -> str:
-    lines = [":clipboard: *Who's in line?*"]
+    lines = [":hourglass_flowing_sand: *Who's in line?*"]
     waiting = [url for url in queue if url != processing_url]
 
     if not waiting and not processing_url:
@@ -189,7 +191,11 @@ def format_skip(url: str, reason: str) -> str:
 
 
 def format_merged(url: str) -> str:
-    return f":tada: {pr_link(url)} · merged and done!"
+    return f":white_check_mark: {pr_link(url)} · merged and done!"
+
+
+def format_preflight_reject(url: str, reason: str) -> str:
+    return f":no_entry: {pr_link(url)} · not queued · {cute_reason(reason)}"
 
 
 def format_failed(url: str, reason: str) -> str:

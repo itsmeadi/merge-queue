@@ -57,7 +57,7 @@ Keep it running with `tmux`, `screen`, or systemd.
 
 | Command | Description |
 |---------|-------------|
-| `/merge 12345` | Queue a PR (number or full URL) |
+| `/merge 12345` | Queue a PR (number or full URL); rejects immediately if PR is missing, closed/merged, conflicting, or not approved |
 | `/merge-queue 12345` | Same as `/merge` |
 | `/merge-status` | Show current queue |
 | `/merge-history` | Show last 5 completed PRs (optional count, max 50) |

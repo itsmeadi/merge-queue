@@ -5,7 +5,16 @@ from __future__ import annotations
 
 import unittest
 
-from messages import format_ci_failed, format_ci_rerun, format_queued, format_queue_status, pr_link
+from messages import (
+    format_ci_failed,
+    format_ci_rerun,
+    format_merged,
+    format_preflight_reject,
+    format_queued,
+    format_queue_status,
+    pr_link,
+    reason_emoji,
+)
 
 
 URL = "https://github.com/GetStream/chat/pull/14699"
@@ -48,6 +57,30 @@ class FormatQueueStatusTest(unittest.TestCase):
         text = format_queue_status([URL, URL2], 0, 0)
         self.assertIn(pr_link(URL), text)
         self.assertIn(pr_link(URL2), text)
+
+    def test_status_header_emoji(self) -> None:
+        text = format_queue_status([URL], 0, 0)
+        self.assertIn(":hourglass_flowing_sand:", text)
+        self.assertIn("Who's in line?", text)
+
+
+class FormatPreflightRejectTest(unittest.TestCase):
+    def test_includes_link_and_cute_reason(self) -> None:
+        text = format_preflight_reject(URL, "missing approval")
+        self.assertIn(":no_entry:", text)
+        self.assertIn(pr_link(URL), text)
+        self.assertIn("not queued", text)
+        self.assertIn("still needs a thumbs-up", text)
+
+
+class FormatMergedTest(unittest.TestCase):
+    def test_merged_uses_checkmark(self) -> None:
+        text = format_merged(URL)
+        self.assertIn(":white_check_mark:", text)
+        self.assertIn("merged and done", text)
+
+    def test_reason_emoji_merged(self) -> None:
+        self.assertEqual(reason_emoji("merged"), ":white_check_mark:")
 
 
 class FormatCiTest(unittest.TestCase):

@@ -18,7 +18,14 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk.errors import SlackApiError
 
-from messages import format_history_lines, format_queue_status, format_queued, pr_label
+from messages import (
+    format_history_lines,
+    format_preflight_reject,
+    format_queue_status,
+    format_queued,
+    pr_label,
+)
+from pr_preflight import check_pr_preflight
 from queue_meta import save_thread
 
 INSTALL_DIR = Path(__file__).resolve().parent
@@ -142,22 +149,6 @@ def read_processing() -> str:
     return PR_PROCESSING_FILE.read_text().strip()
 
 
-def fetch_pr_title(url: str) -> str:
-    try:
-        result = subprocess.run(
-            ["gh", "pr", "view", url, "--json", "title", "-q", ".title"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        pass
-    return ""
-
-
 def capture_thread_ts(client: Any, channel_id: str, message: str, url: str) -> None:
     """Save thread anchor after respond() posts via the slash-command response_url."""
     try:
@@ -205,16 +196,23 @@ def handle_merge_command(
         )
         return
 
+    preflight = check_pr_preflight(url)
+    if not preflight.ok:
+        respond(
+            response_type="ephemeral",
+            text=format_preflight_reject(url, preflight.reason),
+        )
+        return
+
     added, position = append_to_queue(url)
     queue = read_queue()
-    title = fetch_pr_title(url) if added else ""
     message = format_queued(
         url,
         position,
         added,
         queue,
         read_processing(),
-        title,
+        preflight.title,
     )
 
     # respond() uses the slash-command response_url and works without chat:write
