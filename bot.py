@@ -12,11 +12,13 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Callable
 
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
+from slack_sdk.errors import SlackApiError
 
-from messages import format_history_lines, format_queue_status, format_queued
+from messages import format_history_lines, format_queue_status, format_queued, pr_label
 from queue_meta import save_thread
 
 INSTALL_DIR = Path(__file__).resolve().parent
@@ -156,12 +158,46 @@ def fetch_pr_title(url: str) -> str:
     return ""
 
 
-def handle_merge_command(client, channel_id: str, user_id: str, text: str) -> None:
+def capture_thread_ts(client: Any, channel_id: str, message: str, url: str) -> None:
+    """Save thread anchor after respond() posts via the slash-command response_url."""
+    try:
+        auth = client.auth_test()
+        bot_user_id = auth["user_id"]
+    except SlackApiError as exc:
+        print(f"WARN: auth_test failed, skipping thread capture: {exc}", file=sys.stderr)
+        return
+
+    headline = message.split("\n", 1)[0]
+    pr_number = pr_label(url)
+    time.sleep(0.5)
+
+    try:
+        result = client.conversations_history(channel=channel_id, limit=10)
+    except SlackApiError as exc:
+        print(f"WARN: could not read channel history for thread capture: {exc}", file=sys.stderr)
+        return
+
+    for msg in result.get("messages", []):
+        if msg.get("user") != bot_user_id:
+            continue
+        text = msg.get("text", "")
+        if headline in text or pr_number in text:
+            thread_ts = msg.get("ts")
+            if thread_ts:
+                save_thread(PR_THREADS_FILE, url, channel_id, thread_ts)
+            return
+
+
+def handle_merge_command(
+    respond: Callable[..., Any],
+    client: Any,
+    channel_id: str,
+    text: str,
+) -> None:
     url = normalize_pr_input(text)
     if not url:
-        client.chat_postEphemeral(
-            channel=channel_id,
-            user=user_id,
+        respond(
+            response_type="ephemeral",
             text=(
                 "Usage: `/merge 12345` or `/merge-queue 12345` "
                 f"or `/merge https://github.com/{DEFAULT_REPO}/pull/12345`"
@@ -180,10 +216,15 @@ def handle_merge_command(client, channel_id: str, user_id: str, text: str) -> No
         read_processing(),
         title,
     )
-    result = client.chat_postMessage(channel=channel_id, text=message)
-    thread_ts = result.get("ts")
-    if thread_ts:
-        save_thread(PR_THREADS_FILE, url, channel_id, thread_ts)
+
+    # respond() uses the slash-command response_url and works without chat:write
+    # to the channel; chat.postMessage returns channel_not_found in many setups.
+    respond(response_type="in_channel", text=message)
+
+    def save_thread_async() -> None:
+        capture_thread_ts(client, channel_id, message, url)
+
+    threading.Thread(target=save_thread_async, daemon=True).start()
 
 
 def worker_env() -> dict[str, str]:
@@ -263,22 +304,22 @@ def create_app() -> App:
     app = App(token=token)
 
     @app.command("/merge")
-    def handle_merge(ack, client, command):
+    def handle_merge(ack, respond, client, command):
         ack()
         handle_merge_command(
+            respond,
             client,
             command["channel_id"],
-            command["user_id"],
             command.get("text", ""),
         )
 
     @app.command("/merge-queue")
-    def handle_merge_queue(ack, client, command):
+    def handle_merge_queue(ack, respond, client, command):
         ack()
         handle_merge_command(
+            respond,
             client,
             command["channel_id"],
-            command["user_id"],
             command.get("text", ""),
         )
 

@@ -53,6 +53,9 @@ oauth_config:
       - commands
       - chat:write
       - chat:write.public
+      - channels:history
+      - groups:history
+      - im:history
 
 settings:
   socket_mode_enabled: true
