@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from messages import format_queue_status
+from queue_meta import build_meta_map
 from queue_ops import read_queue
 
 
@@ -32,15 +33,25 @@ def build_queue_status_text(
     processing_file = Path(os.environ.get("PR_PROCESSING_FILE", base / "processing.txt"))
     failed_file = Path(os.environ.get("PR_FAILED_FILE", base / "prs-failed.txt"))
     skipped_file = Path(os.environ.get("PR_SKIPPED_FILE", base / "prs-skipped.txt"))
+    threads_file = Path(os.environ.get("PR_THREADS_FILE", base / "prs-threads.json"))
 
+    queue = read_queue(queue_file)
     processing = processing_file.read_text().strip() if processing_file.exists() else ""
+    urls = list(queue)
+    if processing:
+        urls.append(processing)
+    if finished_url:
+        urls.append(finished_url)
+    meta = build_meta_map(threads_file, urls)
+
     return format_queue_status(
-        read_queue(queue_file),
+        queue,
         _count_nonempty_lines(failed_file),
         _count_nonempty_lines(skipped_file),
         processing,
         finished_url=finished_url,
         finished_label=finished_label,
+        meta=meta,
     )
 
 

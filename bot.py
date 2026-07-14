@@ -32,7 +32,7 @@ from messages import (
 )
 from pr_extract import extract_pr_urls
 from pr_preflight import check_pr_preflight
-from queue_meta import lookup_user_id, save_requester, save_thread
+from queue_meta import build_meta_map, lookup_pr_meta, lookup_user_id, save_pr_meta, save_requester, save_thread
 from slack_notify import dm_user
 from queue_ops import append_to_queue as _append_to_queue
 from queue_ops import remove_from_queue as _remove_from_queue
@@ -141,8 +141,10 @@ def read_recent_history(n: int) -> list[HistoryEntry]:
 
 def build_history_message(n: int) -> str:
     entries = read_recent_history(n)
-    rows = [(e.timestamp, e.url, e.outcome, e.reason) for e in entries]
-    return format_history_lines(rows, n)
+    urls = [entry.url for entry in entries]
+    meta = build_meta_map(PR_THREADS_FILE, urls)
+    rows = [(entry.timestamp, entry.url, entry.outcome, entry.reason) for entry in entries]
+    return format_history_lines(rows, n, meta)
 
 
 def build_queue_status_message() -> str:
@@ -230,6 +232,7 @@ def handle_merge_command(
         return
 
     added, position = append_to_queue(url)
+    save_pr_meta(PR_THREADS_FILE, url, preflight.title, preflight.author)
     if user_id:
         save_requester(PR_THREADS_FILE, url, user_id)
     queue = read_queue()
@@ -240,6 +243,7 @@ def handle_merge_command(
         queue,
         read_processing(),
         preflight.title,
+        preflight.author,
     )
 
     # respond() uses the slash-command response_url and works without chat:write
@@ -270,13 +274,14 @@ def handle_remove_command(
         return
 
     requester_id = lookup_user_id(PR_THREADS_FILE, url)
+    title, author = lookup_pr_meta(PR_THREADS_FILE, url)
     status, position = remove_from_queue(url)
     if status == "processing":
-        respond(response_type="in_channel", text=format_remove_processing(url))
+        respond(response_type="in_channel", text=format_remove_processing(url, title, author))
     elif status == "not_found":
-        respond(response_type="ephemeral", text=format_remove_not_found(url))
+        respond(response_type="ephemeral", text=format_remove_not_found(url, title, author))
     else:
-        message = format_removed(url, position)
+        message = format_removed(url, position, title, author)
         respond(response_type="in_channel", text=message)
         notify_user_id = requester_id or actor_user_id
         if notify_user_id:
@@ -403,6 +408,7 @@ def handle_merge_reaction(client: Any, event: dict[str, Any]) -> None:
         return
 
     added, position = append_to_queue(url)
+    save_pr_meta(PR_THREADS_FILE, url, preflight.title, preflight.author)
     save_thread(
         PR_THREADS_FILE,
         url,
@@ -418,6 +424,7 @@ def handle_merge_reaction(client: Any, event: dict[str, Any]) -> None:
         queue,
         read_processing(),
         preflight.title,
+        preflight.author,
     )
     if MERGE_REACTION_ACK:
         slack_add_reaction(client, channel_id, message_ts, REACTION_ACK_OK)

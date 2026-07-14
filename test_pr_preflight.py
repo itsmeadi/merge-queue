@@ -30,9 +30,13 @@ class EvaluatePrTest(unittest.TestCase):
                 "mergeable": "MERGEABLE",
                 "reviewDecision": "APPROVED",
                 "title": "Add feeds translation",
+                "author": {"login": "aditya"},
             }
         )
-        self.assertEqual(result, PreflightResult(ok=True, title="Add feeds translation"))
+        self.assertEqual(
+            result,
+            PreflightResult(ok=True, title="Add feeds translation", author="aditya"),
+        )
 
     def test_behind_allowed(self) -> None:
         result = _evaluate_pr(
@@ -123,12 +127,14 @@ class CheckPrPreflightTest(unittest.TestCase):
                     "mergeable": "MERGEABLE",
                     "reviewDecision": "APPROVED",
                     "title": "Add feeds translation",
+                    "author": {"login": "aditya"},
                 }
             )
         )
         result = check_pr_preflight(URL)
         self.assertTrue(result.ok)
         self.assertEqual(result.title, "Add feeds translation")
+        self.assertEqual(result.author, "aditya")
 
 
 if __name__ == "__main__":

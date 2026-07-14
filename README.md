@@ -63,7 +63,7 @@ Keep it running with `tmux`, `screen`, or systemd.
 | `/merge 12345` | Queue a PR (number or full URL); rejects immediately if PR is missing, closed/merged, conflicting, or not approved |
 | `/merge-queue 12345` | Same as `/merge` |
 | `/merge-remove 12345` | Remove a PR from the queue (won't stop one already merging) |
-| `/merge-status` | Show current queue |
+| `/merge-status` | Refresh the living queue board |
 | `/merge-history` | Show last 5 completed PRs (optional count, max 50) |
 | `/merge-deploy` | Pull from git and restart bot + worker (allowlisted users only) |
 
@@ -72,6 +72,13 @@ Keep it running with `tmux`, `screen`, or systemd.
 React with **`:merge_bot:`** on any message that contains a `GetStream/chat` PR link (GitHub notifications, pasted URLs, etc.) to queue it — same preflight as `/merge`.
 
 When your queued PR finishes (merged, skipped, failed, or removed), **merge-bot DMs you** with the outcome.
+
+Queue lines include the PR author (`@github-login`) and a truncated title (default 50 chars, set `PR_TITLE_MAX_LEN` in `.env`):
+
+```
+1. :loading: #14744 · @aditya · Add feeds translation for… · processing
+1. :white_check_mark: #14744 · @aditya · Add feeds translation for… · merged
+```
 
 | Emoji | Who | When |
 |-------|-----|------|
@@ -177,6 +184,7 @@ Worker behavior:
 | `MERGE_REACTION_EMOJI` | `merge_bot` | Custom emoji name to react with and queue a PR |
 | `MERGED_REACTION_EMOJI` | `merged` | Custom emoji bot adds to source message when PR merges |
 | `MERGE_REACTION_ACK` | `true` | Bot adds ack reactions on emoji enqueue |
+| `PR_TITLE_MAX_LEN` | `50` | Max characters for PR title in Slack lines |
 
 ## Skip vs failed
 

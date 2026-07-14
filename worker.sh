@@ -254,7 +254,7 @@ record_merged_pr() {
   slack_post "$msg"
   notify_requester "$url" "$msg"
   remove_from_queue "$url"
-  refresh_queue_status "$url" "done"
+  refresh_queue_status "$url" "merged"
 }
 
 skip_pr() {
@@ -533,7 +533,11 @@ process_pr() {
     slack_post "$msg"
     notify_requester "$url" "$msg"
     remove_from_queue "$url"
-    refresh_queue_status "$url" "done"
+    if [[ "$state" == "MERGED" ]]; then
+      refresh_queue_status "$url" "merged"
+    else
+      refresh_queue_status "$url" "closed"
+    fi
     return 0
   fi
 

@@ -37,8 +37,20 @@ class BuildQueueStatusTextTest(unittest.TestCase):
             base = Path(tmp)
             queue_file = base / "prs.txt"
             processing_file = base / "processing.txt"
+            threads_file = base / "prs-threads.json"
             queue_file.write_text(f"{URL}\n")
             processing_file.write_text(URL)
+            threads_file.write_text(
+                json.dumps(
+                    {
+                        URL: {
+                            "title": "Add feeds translation",
+                            "author": "aditya",
+                        }
+                    }
+                )
+                + "\n"
+            )
 
             with patch.dict(
                 "os.environ",
@@ -46,6 +58,7 @@ class BuildQueueStatusTextTest(unittest.TestCase):
                     "MERGE_QUEUE_DIR": str(base),
                     "PR_QUEUE_FILE": str(queue_file),
                     "PR_PROCESSING_FILE": str(processing_file),
+                    "PR_THREADS_FILE": str(threads_file),
                 },
                 clear=False,
             ):
@@ -53,6 +66,8 @@ class BuildQueueStatusTextTest(unittest.TestCase):
             self.assertIn("Who's in line?", text)
             self.assertIn(":loading:", text)
             self.assertIn("processing", text)
+            self.assertIn("@aditya", text)
+            self.assertIn("Add feeds translation", text)
 
 
 class RefreshQueueStatusTest(unittest.TestCase):

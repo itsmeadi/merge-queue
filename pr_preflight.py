@@ -14,6 +14,14 @@ class PreflightResult:
     ok: bool
     reason: str = ""
     title: str = ""
+    author: str = ""
+
+
+def _author_login(data: dict[str, object]) -> str:
+    author = data.get("author")
+    if isinstance(author, dict):
+        return str(author.get("login") or "").strip()
+    return ""
 
 
 def _evaluate_pr(data: dict[str, object]) -> PreflightResult:
@@ -21,18 +29,19 @@ def _evaluate_pr(data: dict[str, object]) -> PreflightResult:
     mergeable = str(data.get("mergeable") or "")
     review = str(data.get("reviewDecision") or "")
     title = str(data.get("title") or "").strip()
+    author = _author_login(data)
 
     if state == "MERGED":
-        return PreflightResult(ok=False, reason="already MERGED", title=title)
+        return PreflightResult(ok=False, reason="already MERGED", title=title, author=author)
     if state == "CLOSED":
-        return PreflightResult(ok=False, reason="already CLOSED", title=title)
+        return PreflightResult(ok=False, reason="already CLOSED", title=title, author=author)
     if mergeable == "CONFLICTING":
-        return PreflightResult(ok=False, reason="merge conflict", title=title)
+        return PreflightResult(ok=False, reason="merge conflict", title=title, author=author)
     if review == "REVIEW_REQUIRED":
-        return PreflightResult(ok=False, reason="missing approval", title=title)
+        return PreflightResult(ok=False, reason="missing approval", title=title, author=author)
     if review == "CHANGES_REQUESTED":
-        return PreflightResult(ok=False, reason="changes requested", title=title)
-    return PreflightResult(ok=True, title=title)
+        return PreflightResult(ok=False, reason="changes requested", title=title, author=author)
+    return PreflightResult(ok=True, title=title, author=author)
 
 
 def check_pr_preflight(url: str, timeout: int = 15) -> PreflightResult:
@@ -44,7 +53,7 @@ def check_pr_preflight(url: str, timeout: int = 15) -> PreflightResult:
                 "view",
                 url,
                 "--json",
-                "state,mergeable,reviewDecision,title",
+                "state,mergeable,reviewDecision,title,author",
             ],
             capture_output=True,
             text=True,
@@ -78,6 +87,7 @@ def main() -> None:
                 "ok": preflight.ok,
                 "reason": preflight.reason,
                 "title": preflight.title,
+                "author": preflight.author,
             }
         )
     )

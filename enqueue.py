@@ -11,11 +11,13 @@ import sys
 from pathlib import Path
 
 from pr_preflight import check_pr_preflight
+from queue_meta import save_pr_meta
 
 DEFAULT_REPO = os.environ.get("DEFAULT_REPO", "GetStream/chat")
 INSTALL_DIR = Path(__file__).resolve().parent
 QUEUE_DATA_DIR = Path(os.environ.get("MERGE_QUEUE_DIR", str(INSTALL_DIR)))
 PR_QUEUE_FILE = Path(os.environ.get("PR_QUEUE_FILE", QUEUE_DATA_DIR / "prs.txt"))
+PR_THREADS_FILE = Path(os.environ.get("PR_THREADS_FILE", QUEUE_DATA_DIR / "prs-threads.json"))
 
 PR_URL_RE = re.compile(r"github\.com/[^/]+/[^/]+/pull/\d+")
 
@@ -65,10 +67,12 @@ def enqueue(text: str) -> dict[str, object]:
         }
 
     added, position = append_to_queue(url)
+    save_pr_meta(PR_THREADS_FILE, url, preflight.title, preflight.author)
     return {
         "ok": True,
         "url": url,
         "title": preflight.title,
+        "author": preflight.author,
         "queued": added,
         "position": position,
         "queue_length": len(read_queue()),

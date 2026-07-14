@@ -53,11 +53,45 @@ def save_requester(path: Path, url: str, user_id: str) -> None:
     upsert_queue_meta(path, url, user_id=user_id)
 
 
+def save_pr_meta(path: Path, url: str, title: str, author: str) -> None:
+    fields: dict[str, str] = {}
+    if title.strip():
+        fields["title"] = title.strip()
+    if author.strip():
+        fields["author"] = author.strip()
+    if fields:
+        upsert_queue_meta(path, url, **fields)
+
+
+def lookup_pr_meta(path: Path, url: str) -> tuple[str, str]:
+    entry = load_threads(path).get(url, {})
+    return str(entry.get("title") or ""), str(entry.get("author") or "")
+
+
+def build_meta_map(path: Path, urls: list[str]) -> dict[str, tuple[str, str]]:
+    data = load_threads(path)
+    meta: dict[str, tuple[str, str]] = {}
+    for url in urls:
+        if not url:
+            continue
+        entry = data.get(url, {})
+        title = str(entry.get("title") or "")
+        author = str(entry.get("author") or "")
+        if title or author:
+            meta[url] = (title, author)
+    return meta
+
+
 def clear_thread(path: Path, url: str) -> None:
     data = load_threads(path)
     if url not in data:
         return
-    del data[url]
+    entry = data[url]
+    kept = {key: value for key, value in entry.items() if key in ("title", "author") and value}
+    if kept:
+        data[url] = kept
+    else:
+        del data[url]
     save_threads(path, data)
 
 
