@@ -22,7 +22,6 @@ from slack_sdk.errors import SlackApiError
 from messages import (
     format_history_lines,
     format_preflight_reject,
-    format_queue_status,
     format_queued,
     format_reaction_no_pr,
     format_remove_not_found,
@@ -36,7 +35,7 @@ from queue_meta import build_meta_map_with_fallback, lookup_pr_meta, lookup_user
 from slack_notify import dm_user
 from queue_ops import append_to_queue as _append_to_queue
 from queue_ops import remove_from_queue as _remove_from_queue
-from slack_status import refresh_queue_status
+from slack_status import build_queue_status_text, refresh_queue_status
 
 INSTALL_DIR = Path(__file__).resolve().parent
 QUEUE_DATA_DIR = Path(os.environ.get("MERGE_QUEUE_DIR", str(INSTALL_DIR)))
@@ -148,10 +147,7 @@ def build_history_message(n: int) -> str:
 
 
 def build_queue_status_message() -> str:
-    queue = read_queue()
-    failed = [line for line in PR_FAILED_FILE.read_text().splitlines() if line.strip()] if PR_FAILED_FILE.exists() else []
-    skipped = [line for line in PR_SKIPPED_FILE.read_text().splitlines() if line.strip()] if PR_SKIPPED_FILE.exists() else []
-    return format_queue_status(queue, len(failed), len(skipped), read_processing())
+    return build_queue_status_text()
 
 
 def read_processing() -> str:
@@ -545,11 +541,12 @@ def create_app() -> App:
     @app.command("/merge-status")
     def handle_merge_status(ack, respond, command):
         ack()
+        text = build_queue_status_text()
         refresh_queue_status(
             channel_id=SLACK_CHANNEL_ID,
             anchor_file=QUEUE_STATUS_FILE,
         )
-        respond(response_type="ephemeral", text="Queue board updated.")
+        respond(response_type="in_channel", text=text)
 
     @app.command("/merge-history")
     def handle_merge_history(ack, respond, command):
