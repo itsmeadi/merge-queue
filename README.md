@@ -106,7 +106,8 @@ Worker behavior:
 - Re-syncs if the PR falls behind again while waiting
 - Defaults to **squash merge** (required for `GetStream/chat`)
 - **Skips** non-retryable PRs (missing approval, merge conflict, branch protection) → `prs-skipped.txt`, continues queue
-- **Retries** only flaky CI failures (`gh run rerun`, up to `MAX_RETRIES`)
+- **Retries** only flaky CI failures (`gh run rerun`, up to `MAX_RETRIES`, default 3)
+- **CI failures** post as threaded replies under the original `/merge` message with failed check names and a log excerpt
 
 - **bot.py** listens to Slack, manages the queue file, starts **worker.sh**
 - **worker.sh** does the git/GitHub work via `gh` CLI
@@ -120,7 +121,7 @@ Worker behavior:
 | `SLACK_APP_TOKEN` | — | App-level token for Socket Mode (`xapp-...`) |
 | `SLACK_CHANNEL_ID` | — | Channel for worker status posts |
 | `DEFAULT_REPO` | `GetStream/chat` | Default repo for `/merge 12345` |
-| `MAX_RETRIES` | `5` | CI rerun attempts per PR |
+| `MAX_RETRIES` | `3` | CI rerun attempts per PR |
 | `POLL_INTERVAL` | `10` | Seconds to wait when queue is empty |
 | `CHECK_INTERVAL` | `10` | CI poll interval |
 | `MERGE_METHOD` | `squash` | `merge`, `squash`, or `rebase` |
@@ -129,6 +130,7 @@ Worker behavior:
 | `REQUIRED_CHECK` | `Ready to merge` | Required GitHub check that must pass before merge |
 | `MERGE_QUEUE_DIR` | install dir | Queue + history files live next to `bot.py` |
 | `PR_PROCESSING_FILE` | `.../processing.txt` | PR currently being processed (shown in `/merge-status`) |
+| `PR_THREADS_FILE` | `.../prs-threads.json` | Maps queued PR URLs to Slack thread anchors for CI updates |
 | `PR_SKIPPED_FILE` | `.../prs-skipped.txt` | Skipped PRs (approval, conflict, policy) |
 | `PR_MERGED_FILE` | `.../prs-merged.txt` | Successfully merged PRs |
 | `START_WORKER` | `true` | Set `false` to run worker separately |

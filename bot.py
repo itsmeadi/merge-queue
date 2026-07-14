@@ -17,6 +17,7 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from messages import format_history_lines, format_queue_status, format_queued
+from queue_meta import save_thread
 
 INSTALL_DIR = Path(__file__).resolve().parent
 QUEUE_DATA_DIR = Path(os.environ.get("MERGE_QUEUE_DIR", str(INSTALL_DIR)))
@@ -25,6 +26,7 @@ PR_FAILED_FILE = Path(os.environ.get("PR_FAILED_FILE", QUEUE_DATA_DIR / "prs-fai
 PR_SKIPPED_FILE = Path(os.environ.get("PR_SKIPPED_FILE", QUEUE_DATA_DIR / "prs-skipped.txt"))
 PR_MERGED_FILE = Path(os.environ.get("PR_MERGED_FILE", QUEUE_DATA_DIR / "prs-merged.txt"))
 PR_PROCESSING_FILE = Path(os.environ.get("PR_PROCESSING_FILE", QUEUE_DATA_DIR / "processing.txt"))
+PR_THREADS_FILE = Path(os.environ.get("PR_THREADS_FILE", QUEUE_DATA_DIR / "prs-threads.json"))
 DEFAULT_REPO = os.environ.get("DEFAULT_REPO", "GetStream/chat")
 SLACK_CHANNEL_ID = os.environ.get("SLACK_CHANNEL_ID", "")
 START_WORKER = os.environ.get("START_WORKER", "true").lower() != "false"
@@ -138,11 +140,28 @@ def read_processing() -> str:
     return PR_PROCESSING_FILE.read_text().strip()
 
 
-def handle_merge_command(respond, text: str) -> None:
+def fetch_pr_title(url: str) -> str:
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "view", url, "--json", "title", "-q", ".title"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return ""
+
+
+def handle_merge_command(client, channel_id: str, user_id: str, text: str) -> None:
     url = normalize_pr_input(text)
     if not url:
-        respond(
-            response_type="ephemeral",
+        client.chat_postEphemeral(
+            channel=channel_id,
+            user=user_id,
             text=(
                 "Usage: `/merge 12345` or `/merge-queue 12345` "
                 f"or `/merge https://github.com/{DEFAULT_REPO}/pull/12345`"
@@ -152,10 +171,19 @@ def handle_merge_command(respond, text: str) -> None:
 
     added, position = append_to_queue(url)
     queue = read_queue()
-    respond(
-        response_type="in_channel",
-        text=format_queued(url, position, added, queue),
+    title = fetch_pr_title(url) if added else ""
+    message = format_queued(
+        url,
+        position,
+        added,
+        queue,
+        read_processing(),
+        title,
     )
+    result = client.chat_postMessage(channel=channel_id, text=message)
+    thread_ts = result.get("ts")
+    if thread_ts:
+        save_thread(PR_THREADS_FILE, url, channel_id, thread_ts)
 
 
 def worker_env() -> dict[str, str]:
@@ -167,6 +195,7 @@ def worker_env() -> dict[str, str]:
             "PR_FAILED_FILE": str(PR_FAILED_FILE),
             "PR_SKIPPED_FILE": str(PR_SKIPPED_FILE),
             "PR_MERGED_FILE": str(PR_MERGED_FILE),
+            "PR_THREADS_FILE": str(PR_THREADS_FILE),
             "SLACK_CHANNEL_ID": SLACK_CHANNEL_ID,
         }
     )
@@ -234,14 +263,24 @@ def create_app() -> App:
     app = App(token=token)
 
     @app.command("/merge")
-    def handle_merge(ack, respond, command):
+    def handle_merge(ack, client, command):
         ack()
-        handle_merge_command(respond, command.get("text", ""))
+        handle_merge_command(
+            client,
+            command["channel_id"],
+            command["user_id"],
+            command.get("text", ""),
+        )
 
     @app.command("/merge-queue")
-    def handle_merge_queue(ack, respond, command):
+    def handle_merge_queue(ack, client, command):
         ack()
-        handle_merge_command(respond, command.get("text", ""))
+        handle_merge_command(
+            client,
+            command["channel_id"],
+            command["user_id"],
+            command.get("text", ""),
+        )
 
     @app.command("/merge-status")
     def handle_merge_status(ack, respond, command):

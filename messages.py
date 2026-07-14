@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from datetime import datetime
@@ -13,6 +14,10 @@ PR_NUMBER_RE = re.compile(r"/pull/(\d+)")
 def pr_label(url: str) -> str:
     match = PR_NUMBER_RE.search(url)
     return f"#{match.group(1)}" if match else url
+
+
+def pr_link(url: str) -> str:
+    return f"<{url}|{pr_label(url)}>"
 
 
 def format_time(dt: datetime) -> str:
@@ -75,10 +80,9 @@ def format_history_entry(
     reason: str = "",
 ) -> str:
     emoji = reason_emoji(outcome, reason)
-    label = pr_label(url)
     detail = cute_reason(reason, outcome)
     when = format_time(timestamp)
-    return f"• {emoji} {label} · {detail} · {when}"
+    return f"• {emoji} {pr_link(url)} · {detail} · {when}"
 
 
 def format_history_lines(entries: list[tuple[datetime, str, str, str]], n: int) -> str:
@@ -92,6 +96,30 @@ def format_history_lines(entries: list[tuple[datetime, str, str, str]], n: int) 
     return "\n".join(lines)
 
 
+def _format_queue_lines(
+    queue: list[str],
+    processing_url: str = "",
+    highlight_url: str = "",
+) -> list[str]:
+    lines: list[str] = []
+    position = 0
+
+    if processing_url:
+        position += 1
+        lines.append(f"{position}. :gear: {pr_link(processing_url)} · processing")
+
+    for url in queue:
+        if url == processing_url:
+            continue
+        position += 1
+        if url == highlight_url:
+            lines.append(f"{position}. :point_right: {pr_link(url)} · you")
+        else:
+            lines.append(f"{position}. {pr_link(url)}")
+
+    return lines
+
+
 def format_queue_status(
     queue: list[str],
     failed_count: int,
@@ -99,65 +127,108 @@ def format_queue_status(
     processing_url: str = "",
 ) -> str:
     lines = [":clipboard: *Who's in line?*"]
-    if processing_url:
-        lines.append(f":hourglass_flowing_sand: {pr_label(processing_url)} · merging now")
     waiting = [url for url in queue if url != processing_url]
+
     if not waiting and not processing_url:
         lines.append("_Queue is empty — all quiet_")
     else:
-        for i, url in enumerate(waiting):
-            label = pr_label(url)
-            if i == 0 and not processing_url:
-                lines.append(f":rabbit2: {label} · up next!")
-            else:
-                lines.append(f"   {i + 1}. {label}")
+        lines.extend(_format_queue_lines(queue, processing_url))
+
     lines.append(f"\n_{len(queue)} waiting · {failed_count} failed · {skipped_count} skipped_")
     return "\n".join(lines)
 
 
-def format_queued(url: str, position: int, added: bool, queue: list[str] | None = None) -> str:
-    label = pr_label(url)
-    if added:
-        if position == 1:
-            headline = f":rabbit2: {label} · queued · you're up next!"
-        else:
-            headline = f":rabbit2: {label} · queued · spot {position} in line"
-    else:
-        headline = f":rabbit2: {label} · already in line (spot {position})"
+def format_queued(
+    url: str,
+    position: int,
+    added: bool,
+    queue: list[str] | None = None,
+    processing_url: str = "",
+    title: str = "",
+) -> str:
+    link = pr_link(url)
+    queue = queue or []
+    total = len(queue)
+    title_suffix = f" — {title.strip()}" if title and title.strip() else ""
 
-    lines = [headline]
-    if queue:
-        lines.append("")
-        lines.append(format_queue_status(queue, 0, 0))
+    if not added:
+        return f":information_source: {link} · already queued (spot {position})"
+
+    if total <= 1 and not processing_url:
+        if title_suffix:
+            return f":inbox_tray: *Queued* · {link}{title_suffix}\nspot {position} · up next"
+        return f":inbox_tray: *Queued* · {link} · up next"
+
+    headline = f":inbox_tray: *Queued* · {link}{title_suffix} · spot {position} of {total}"
+    lines = [headline, "", "*Queue:*"]
+    lines.extend(_format_queue_lines(queue, processing_url, highlight_url=url))
     return "\n".join(lines)
+
+
+def _format_ci_summary_lines(summary: dict | None) -> list[str]:
+    if not summary:
+        return []
+
+    lines: list[str] = []
+    failed_checks = summary.get("failed_checks") or []
+    if failed_checks:
+        shown = ", ".join(str(name) for name in failed_checks[:5])
+        lines.append(f"Failed: {shown}")
+
+    excerpt = (summary.get("excerpt") or "").strip()
+    if excerpt:
+        lines.append(f"```{excerpt[:400]}```")
+    return lines
 
 
 # --- Worker notification formatters ---
 
 def format_skip(url: str, reason: str) -> str:
     emoji = reason_emoji("skipped", reason)
-    return f"{emoji} {pr_label(url)} · {cute_reason(reason, 'skipped')}"
+    return f"{emoji} {pr_link(url)} · {cute_reason(reason, 'skipped')}"
 
 
 def format_merged(url: str) -> str:
-    return f":tada: {pr_label(url)} · merged and done!"
+    return f":tada: {pr_link(url)} · merged and done!"
 
 
 def format_failed(url: str, reason: str) -> str:
     emoji = reason_emoji("failed", reason)
-    return f"{emoji} {pr_label(url)} · {cute_reason(reason, 'failed')}"
+    return f"{emoji} {pr_link(url)} · {cute_reason(reason, 'failed')}"
 
 
 def format_processing(url: str) -> str:
-    return f":hourglass_flowing_sand: {pr_label(url)} · syncing with base..."
+    return f":hourglass_flowing_sand: {pr_link(url)} · syncing with base..."
 
 
 def format_already_done(url: str, state: str) -> str:
-    return f":information_source: {pr_label(url)} · already {state.lower()}, removed from queue"
+    return f":information_source: {pr_link(url)} · already {state.lower()}, removed from queue"
 
 
-def format_ci_rerun(url: str, attempt: int, max_attempts: int) -> str:
-    return f":repeat: {pr_label(url)} · CI hiccup, retry {attempt}/{max_attempts}..."
+def format_ci_rerun(
+    url: str,
+    attempt: int,
+    max_attempts: int,
+    summary: dict | None = None,
+) -> str:
+    lines = [
+        f":arrows_counterclockwise: {pr_link(url)} · CI failed, retry {attempt}/{max_attempts}",
+    ]
+    lines.extend(_format_ci_summary_lines(summary))
+    lines.append("Rerunning failed jobs...")
+    return "\n".join(lines)
+
+
+def format_ci_failed(
+    url: str,
+    max_attempts: int,
+    summary: dict | None = None,
+) -> str:
+    lines = [
+        f":x: {pr_link(url)} · CI failed after {max_attempts} retries — giving up",
+    ]
+    lines.extend(_format_ci_summary_lines(summary))
+    return "\n".join(lines)
 
 
 def format_worker_started(poll_interval: int) -> str:
@@ -171,13 +242,23 @@ def main() -> None:
     cmd = sys.argv[1]
     args = sys.argv[2:]
 
+    summary: dict | None = None
+    if "--summary-stdin" in args:
+        idx = args.index("--summary-stdin")
+        args = args[:idx]
+        try:
+            summary = json.load(sys.stdin)
+        except json.JSONDecodeError:
+            summary = None
+
     messages = {
         "skip": lambda: format_skip(args[0], args[1] if len(args) > 1 else ""),
         "merged": lambda: format_merged(args[0]),
         "failed": lambda: format_failed(args[0], args[1] if len(args) > 1 else ""),
         "processing": lambda: format_processing(args[0]),
         "already_done": lambda: format_already_done(args[0], args[1] if len(args) > 1 else "done"),
-        "ci_rerun": lambda: format_ci_rerun(args[0], int(args[1]), int(args[2])),
+        "ci_rerun": lambda: format_ci_rerun(args[0], int(args[1]), int(args[2]), summary),
+        "ci_failed": lambda: format_ci_failed(args[0], int(args[1]), summary),
         "worker_started": lambda: format_worker_started(int(args[0])),
     }
 

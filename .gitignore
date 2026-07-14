@@ -4,6 +4,7 @@ prs-failed.txt
 prs-skipped.txt
 prs-merged.txt
 processing.txt
+prs-threads.json
 
 # Python
 .venv/

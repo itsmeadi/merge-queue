@@ -14,7 +14,8 @@ PR_QUEUE_FILE="${PR_QUEUE_FILE:-${MERGE_QUEUE_DIR}/prs.txt}"
 PR_FAILED_FILE="${PR_FAILED_FILE:-${MERGE_QUEUE_DIR}/prs-failed.txt}"
 PR_SKIPPED_FILE="${PR_SKIPPED_FILE:-${MERGE_QUEUE_DIR}/prs-skipped.txt}"
 PR_MERGED_FILE="${PR_MERGED_FILE:-${MERGE_QUEUE_DIR}/prs-merged.txt}"
-MAX_RETRIES="${MAX_RETRIES:-5}"
+PR_THREADS_FILE="${PR_THREADS_FILE:-${MERGE_QUEUE_DIR}/prs-threads.json}"
+MAX_RETRIES="${MAX_RETRIES:-3}"
 POLL_INTERVAL="${POLL_INTERVAL:-10}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-10}"
 MERGE_METHOD="${MERGE_METHOD:-squash}"
@@ -36,7 +37,7 @@ and merge when green. Optionally post status updates to Slack.
 Options:
   -f FILE   Queue file (default: \$MERGE_QUEUE_DIR/prs.txt, install dir)
   -o FILE   Failed PRs output file (default: \$MERGE_QUEUE_DIR/prs-failed.txt)
-  -r N      Max CI rerun attempts per PR (default: 5)
+  -r N      Max CI rerun attempts per PR (default: 3)
   -p N      Poll interval when queue is empty, seconds (default: 10)
   -i N      CI check poll interval, seconds (default: 10)
   -c ID     Slack channel ID for notifications
@@ -80,11 +81,17 @@ require_cmd() {
 
 slack_post() {
   local text="$1"
-  if [[ -z "$SLACK_BOT_TOKEN" || -z "$SLACK_CHANNEL_ID" ]]; then
+  local channel="${2:-$SLACK_CHANNEL_ID}"
+  local thread_ts="${3:-}"
+  if [[ -z "$SLACK_BOT_TOKEN" || -z "$channel" ]]; then
     return 0
   fi
   local payload resp ok
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"channel": sys.argv[1], "text": sys.argv[2]}))' "$SLACK_CHANNEL_ID" "$text")"
+  if [[ -n "$thread_ts" ]]; then
+    payload="$(python3 -c 'import json,sys; d={"channel": sys.argv[1], "text": sys.argv[2], "thread_ts": sys.argv[3]}; print(json.dumps(d))' "$channel" "$text" "$thread_ts")"
+  else
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"channel": sys.argv[1], "text": sys.argv[2]}))' "$channel" "$text")"
+  fi
   resp="$(curl -sS -X POST https://slack.com/api/chat.postMessage \
     -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
     -H "Content-type: application/json; charset=utf-8" \
@@ -92,6 +99,44 @@ slack_post() {
   ok="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("ok", False))' <<<"$resp" 2>/dev/null || echo False)"
   if [[ "$ok" != "True" ]]; then
     log "WARN: failed to post to Slack: $resp"
+  fi
+}
+
+lookup_thread() {
+  local url="$1"
+  python3 "$SCRIPT_DIR/queue_meta.py" lookup "$PR_THREADS_FILE" "$url" 2>/dev/null || true
+}
+
+clear_thread_meta() {
+  local url="$1"
+  python3 "$SCRIPT_DIR/queue_meta.py" clear "$PR_THREADS_FILE" "$url" >/dev/null 2>&1 || true
+}
+
+slack_post_for_pr() {
+  local text="$1"
+  local url="$2"
+  local channel thread_ts
+  read -r channel thread_ts < <(lookup_thread "$url")
+  if [[ -n "$channel" && -n "$thread_ts" ]]; then
+    slack_post "$text" "$channel" "$thread_ts"
+  else
+    slack_post "$text"
+  fi
+}
+
+collect_ci_failure() {
+  local url="$1"
+  python3 "$SCRIPT_DIR/ci_summary.py" "$url" 2>/dev/null || echo '{"failed_checks":[],"job":"","excerpt":""}'
+}
+
+slack_msg_with_summary() {
+  local cmd="$1"
+  local summary="$2"
+  shift 2
+  if [[ -n "$summary" && "$summary" != "{}" ]]; then
+    printf '%s' "$summary" | python3 "$SCRIPT_DIR/messages.py" "$cmd" "$@" --summary-stdin
+  else
+    slack_msg "$cmd" "$@"
   fi
 }
 
@@ -120,6 +165,7 @@ read_queue() {
 
 remove_from_queue() {
   local url="$1"
+  clear_thread_meta "$url"
   if [[ ! -f "$PR_QUEUE_FILE" ]]; then
     return 0
   fi
@@ -470,8 +516,9 @@ process_pr() {
 
     if (( retries >= MAX_RETRIES )); then
       log "CI failed after $MAX_RETRIES reruns, moving to failed file"
+      summary="$(collect_ci_failure "$url")"
+      slack_post_for_pr "$(slack_msg_with_summary ci_failed "$summary" "$url" "$MAX_RETRIES")" "$url"
       append_failed "$url" "CI failed after $MAX_RETRIES reruns"
-      slack_post "$(slack_msg failed "$url" "CI failed after $MAX_RETRIES reruns")"
       remove_from_queue "$url"
       return 0
     fi
@@ -485,7 +532,8 @@ process_pr() {
       continue
     fi
 
-    slack_post "$(slack_msg ci_rerun "$url" "$((retries + 1))" "$MAX_RETRIES")"
+    summary="$(collect_ci_failure "$url")"
+    slack_post_for_pr "$(slack_msg_with_summary ci_rerun "$summary" "$url" "$((retries + 1))" "$MAX_RETRIES")" "$url"
     if ! rerun_failed_ci "$url"; then
       append_failed "$url" "CI failed and could not rerun workflow"
       slack_post "$(slack_msg failed "$url" "CI failed and could not rerun workflow")"
