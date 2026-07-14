@@ -84,6 +84,19 @@ Upload custom emojis: Slack → **Customize workspace** → **Add custom emoji**
 
 Configure in `.env` if names differ: `MERGE_REACTION_EMOJI`, `MERGED_REACTION_EMOJI`.
 
+### Troubleshooting emoji reactions
+
+1. **Reinstall the Slack app** after updating `slack-app-manifest.yaml` — new scopes (`reactions:read`, `reactions:write`) and `reaction_added` event only apply after reinstall (https://api.slack.com/apps → your app → Install App).
+2. **Emoji name must match exactly** — if Slack shows `:merge-bot:` the env is `MERGE_REACTION_EMOJI=merge-bot` (no colons). Check startup log: `Emoji queue trigger: :merge_bot:`.
+3. **`@merge-bot` must be in the channel** where you react.
+4. **Watch `bot.log`** while reacting — you should see `reaction_added: :merge_bot: on C.../...`. If nothing appears, the app is not receiving events (reinstall / duplicate bot processes).
+5. **One bot only** — `ps aux | grep bot.py` should show a single process.
+
+```bash
+tail -f ~/merge-queue/bot.log
+# react :merge_bot: on a PR message — expect log lines within 1s
+```
+
 ## Deploy from Slack
 
 Enable in `.env`:

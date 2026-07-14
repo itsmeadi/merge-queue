@@ -254,23 +254,54 @@ def fetch_message(client: Any, channel_id: str, message_ts: str) -> dict[str, An
             limit=1,
             inclusive=True,
         )
+        messages = result.get("messages") or []
+        if messages and messages[0].get("ts") == message_ts:
+            return messages[0]
     except SlackApiError as exc:
-        print(f"WARN: could not fetch message for reaction: {exc}", file=sys.stderr)
-        return None
-    messages = result.get("messages") or []
-    return messages[0] if messages else None
+        print(f"WARN: conversations.history failed: {exc}", file=sys.stderr)
+
+    try:
+        result = client.conversations_replies(
+            channel=channel_id,
+            ts=message_ts,
+            latest=message_ts,
+            limit=1,
+            inclusive=True,
+        )
+        messages = result.get("messages") or []
+        for msg in messages:
+            if msg.get("ts") == message_ts:
+                return msg
+        if len(messages) == 1:
+            return messages[0]
+    except SlackApiError as exc:
+        print(f"WARN: conversations.replies failed: {exc}", file=sys.stderr)
+    return None
+
+
+def reply_thread_ts(msg: dict[str, Any], message_ts: str) -> str:
+    """Thread parent ts for chat.postMessage — same as message ts for top-level posts."""
+    return str(msg.get("thread_ts") or message_ts)
 
 
 def handle_merge_reaction(client: Any, event: dict[str, Any]) -> None:
-    if event.get("reaction") != MERGE_REACTION_EMOJI:
-        return
-
+    reaction = event.get("reaction", "")
     item = event.get("item") or {}
-    if item.get("type") != "message":
-        return
-
     channel_id = item.get("channel", "")
     message_ts = item.get("ts", "")
+    print(
+        f"reaction_added: :{reaction}: on {channel_id}/{message_ts} "
+        f"(listening for :{MERGE_REACTION_EMOJI}:)",
+        file=sys.stderr,
+    )
+
+    if reaction != MERGE_REACTION_EMOJI:
+        return
+
+    if item.get("type") != "message":
+        print(f"WARN: ignoring reaction on non-message item type={item.get('type')}", file=sys.stderr)
+        return
+
     if not channel_id or not message_ts:
         return
 
@@ -286,13 +317,16 @@ def handle_merge_reaction(client: Any, event: dict[str, Any]) -> None:
 
     msg = fetch_message(client, channel_id, message_ts)
     if not msg:
+        print(f"WARN: could not fetch message {channel_id}/{message_ts}", file=sys.stderr)
         return
+
+    thread_ts = reply_thread_ts(msg, message_ts)
 
     urls = extract_pr_urls(msg, default_repo=DEFAULT_REPO)
     if not urls:
         if MERGE_REACTION_ACK:
             slack_add_reaction(client, channel_id, message_ts, REACTION_ACK_NO_PR)
-        slack_post_thread(client, channel_id, message_ts, format_reaction_no_pr())
+        slack_post_thread(client, channel_id, thread_ts, format_reaction_no_pr())
         return
 
     url = urls[0]
@@ -300,7 +334,7 @@ def handle_merge_reaction(client: Any, event: dict[str, Any]) -> None:
         slack_post_thread(
             client,
             channel_id,
-            message_ts,
+            thread_ts,
             f":information_source: found {len(urls)} PR links — queuing {pr_label(url)}",
         )
 
@@ -311,7 +345,7 @@ def handle_merge_reaction(client: Any, event: dict[str, Any]) -> None:
         slack_post_thread(
             client,
             channel_id,
-            message_ts,
+            thread_ts,
             format_preflight_reject(url, preflight.reason),
         )
         return
@@ -329,7 +363,8 @@ def handle_merge_reaction(client: Any, event: dict[str, Any]) -> None:
     )
     if MERGE_REACTION_ACK:
         slack_add_reaction(client, channel_id, message_ts, REACTION_ACK_OK)
-    slack_post_thread(client, channel_id, message_ts, message)
+    slack_post_thread(client, channel_id, thread_ts, message)
+    print(f"reaction queued {url} at position {position}", file=sys.stderr)
 
 
 def worker_env() -> dict[str, str]:
@@ -499,6 +534,11 @@ def main() -> None:
     app = create_app()
     handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     print(f"Merge queue bot is running (Socket Mode, queue: {PR_QUEUE_FILE})")
+    print(
+        f"Emoji queue trigger: :{MERGE_REACTION_EMOJI}: "
+        f"(set MERGE_REACTION_EMOJI in .env if your custom emoji name differs)",
+        file=sys.stderr,
+    )
     handler.start()
 
 
