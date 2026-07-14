@@ -14,7 +14,7 @@ display_information:
   name: Merge Queue Bot
   description: FIFO merge queue for GetStream/chat — queue PRs, sync with base, wait for CI, squash merge.
   long_description: |
-    Merge Queue Bot is a first-in-first-out merge queue for [GetStream/chat](https://github.com/GetStream/chat). Queue a pull request from Slack and the worker handles the rest: sync with base, wait for CI on the latest commit, squash merge when green.
+    Merge Queue Bot is a queue for [GetStream/chat](https://github.com/GetStream/chat) pull requests. Queue a PR from Slack and the worker handles the rest: sync with base, wait for CI on the latest commit, squash merge when green.
 
     How it works
     - One PR processed at a time — no merge-from-master stampede
