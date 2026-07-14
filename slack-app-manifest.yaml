@@ -9,20 +9,30 @@
 #   5. Copy .env.example → .env, fill in tokens, run ./start.sh
 #
 # Invite the bot to your channel: /invite @merge-bot
+#
+# About tab links — apply this file ONLY via Features → App Manifest (Save Changes).
+# Do NOT edit Basic Information → Long description afterward (shows raw text there).
+# Verify in Slack client: Apps → Merge Queue Bot → About (not api.slack.com admin UI).
+#
+# If About links break after edits: set long_description to "" → Save → paste this
+# file back → Save again (nuclear reset).
+#
+# Markdown [text](url) does not render on the in-client About tab for internal apps.
+# long_description below uses bare https URLs (auto-linked by Slack).
 
 display_information:
   name: Merge Queue Bot
   description: FIFO merge queue for GetStream/chat PRs. Commands - merge, merge-status, merge-history, merge-deploy.
   long_description: |
-    Queue [GetStream/chat](https://github.com/GetStream/chat) pull requests from Slack. Syncs each branch with the base branch, waits for CI on the latest commit, and squash merges when green.
+    Queue GetStream/chat pull requests from Slack. Syncs each branch with the base branch, waits for CI on the latest commit, and squash merges when green.
 
     Skips PRs that cannot merge and retries flaky CI failures.
 
     Commands: merge, merge-queue, merge-status, merge-history, merge-deploy (admin only).
 
-    Source: [github.com/itsmeadi/merge-queue](https://github.com/itsmeadi/merge-queue)
+    GetStream/chat: https://github.com/GetStream/chat
 
-    For [GetStream/chat](https://github.com/GetStream/chat) only.
+    Source: https://github.com/itsmeadi/merge-queue
   background_color: "#0052cc"
 
 features:
