@@ -257,6 +257,13 @@ def format_worker_started(poll_interval: int) -> str:
     return f":robot_face: Merge bot is awake · checking every {poll_interval}s"
 
 
+def format_dm_update(body: str) -> str:
+    text = (body or "").strip()
+    if not text:
+        return "Merge queue update"
+    return f"*Merge queue update*\n{text}"
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         sys.exit(2)

@@ -70,6 +70,7 @@ oauth_config:
       - mpim:history
       - reactions:read
       - reactions:write
+      - im:write
 
 settings:
   socket_mode_enabled: true

@@ -71,6 +71,8 @@ Keep it running with `tmux`, `screen`, or systemd.
 
 React with **`:merge_bot:`** on any message that contains a `GetStream/chat` PR link (GitHub notifications, pasted URLs, etc.) to queue it — same preflight as `/merge`.
 
+When your queued PR finishes (merged, skipped, failed, or removed), **merge-bot DMs you** with the outcome.
+
 | Emoji | Who | When |
 |-------|-----|------|
 | `:merge_bot:` | You | Queue the PR |
@@ -165,7 +167,7 @@ Worker behavior:
 | `REQUIRED_CHECK` | `Ready to merge` | Required GitHub check that must pass before merge |
 | `MERGE_QUEUE_DIR` | install dir | Queue + history files live next to `bot.py` |
 | `PR_PROCESSING_FILE` | `.../processing.txt` | PR currently being processed (shown in `/merge-status`) |
-| `PR_THREADS_FILE` | `.../prs-threads.json` | Maps queued PR URLs to Slack thread anchors for CI updates |
+| `PR_THREADS_FILE` | `.../prs-threads.json` | Thread anchors for CI updates + requester user IDs for DMs |
 | `PR_SKIPPED_FILE` | `.../prs-skipped.txt` | Skipped PRs (approval, conflict, policy) |
 | `PR_MERGED_FILE` | `.../prs-merged.txt` | Successfully merged PRs |
 | `START_WORKER` | `true` | Set `false` to run worker separately |

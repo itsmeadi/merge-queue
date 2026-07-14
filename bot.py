@@ -32,7 +32,8 @@ from messages import (
 )
 from pr_extract import extract_pr_urls
 from pr_preflight import check_pr_preflight
-from queue_meta import save_thread
+from queue_meta import lookup_user_id, save_requester, save_thread
+from slack_notify import dm_user
 from queue_ops import append_to_queue as _append_to_queue
 from queue_ops import remove_from_queue as _remove_from_queue
 
@@ -187,6 +188,7 @@ def handle_merge_command(
     client: Any,
     channel_id: str,
     text: str,
+    user_id: str = "",
 ) -> None:
     url = normalize_pr_input(text)
     if not url:
@@ -208,6 +210,8 @@ def handle_merge_command(
         return
 
     added, position = append_to_queue(url)
+    if user_id:
+        save_requester(PR_THREADS_FILE, url, user_id)
     queue = read_queue()
     message = format_queued(
         url,
@@ -228,7 +232,11 @@ def handle_merge_command(
     threading.Thread(target=save_thread_async, daemon=True).start()
 
 
-def handle_remove_command(respond: Callable[..., Any], text: str) -> None:
+def handle_remove_command(
+    respond: Callable[..., Any],
+    text: str,
+    actor_user_id: str = "",
+) -> None:
     url = normalize_pr_input(text)
     if not url:
         respond(
@@ -240,13 +248,18 @@ def handle_remove_command(respond: Callable[..., Any], text: str) -> None:
         )
         return
 
+    requester_id = lookup_user_id(PR_THREADS_FILE, url)
     status, position = remove_from_queue(url)
     if status == "processing":
         respond(response_type="in_channel", text=format_remove_processing(url))
     elif status == "not_found":
         respond(response_type="ephemeral", text=format_remove_not_found(url))
     else:
-        respond(response_type="in_channel", text=format_removed(url, position))
+        message = format_removed(url, position)
+        respond(response_type="in_channel", text=message)
+        notify_user_id = requester_id or actor_user_id
+        if notify_user_id:
+            dm_user(notify_user_id, message)
 
 
 def slack_add_reaction(client: Any, channel_id: str, timestamp: str, emoji: str) -> None:
@@ -368,7 +381,13 @@ def handle_merge_reaction(client: Any, event: dict[str, Any]) -> None:
         return
 
     added, position = append_to_queue(url)
-    save_thread(PR_THREADS_FILE, url, channel_id, message_ts)
+    save_thread(
+        PR_THREADS_FILE,
+        url,
+        channel_id,
+        message_ts,
+        user_id=str(event.get("user") or ""),
+    )
     queue = read_queue()
     message = format_queued(
         url,
@@ -469,6 +488,7 @@ def create_app() -> App:
             client,
             command["channel_id"],
             command.get("text", ""),
+            command.get("user_id", ""),
         )
 
     @app.command("/merge-queue")
@@ -479,12 +499,17 @@ def create_app() -> App:
             client,
             command["channel_id"],
             command.get("text", ""),
+            command.get("user_id", ""),
         )
 
     @app.command("/merge-remove")
     def handle_merge_remove(ack, respond, command):
         ack()
-        handle_remove_command(respond, command.get("text", ""))
+        handle_remove_command(
+            respond,
+            command.get("text", ""),
+            command.get("user_id", ""),
+        )
 
     @app.command("/merge-status")
     def handle_merge_status(ack, respond, command):

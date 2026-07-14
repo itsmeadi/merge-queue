@@ -154,6 +154,15 @@ slack_post_for_pr() {
   fi
 }
 
+notify_requester() {
+  local url="$1"
+  local text="$2"
+  if [[ -z "$SLACK_BOT_TOKEN" ]]; then
+    return 0
+  fi
+  MERGE_NOTIFY_TEXT="$text" python3 "$SCRIPT_DIR/slack_notify.py" dm-for-pr "$url" >/dev/null 2>&1 || true
+}
+
 collect_ci_failure() {
   local url="$1"
   python3 "$SCRIPT_DIR/ci_summary.py" "$url" 2>/dev/null || echo '{"failed_checks":[],"job":"","excerpt":""}'
@@ -228,18 +237,35 @@ append_merged() {
 
 record_merged_pr() {
   local url="$1"
+  local msg
   append_merged "$url"
   slack_react_for_pr "$url"
-  slack_post "$(slack_msg merged "$url")"
+  msg="$(slack_msg merged "$url")"
+  slack_post "$msg"
+  notify_requester "$url" "$msg"
   remove_from_queue "$url"
 }
 
 skip_pr() {
   local url="$1"
   local reason="$2"
+  local msg
   log "Skipping $url — $reason"
   append_skipped "$url" "$reason"
-  slack_post "$(slack_msg skip "$url" "$reason")"
+  msg="$(slack_msg skip "$url" "$reason")"
+  slack_post "$msg"
+  notify_requester "$url" "$msg"
+  remove_from_queue "$url"
+}
+
+finish_failed() {
+  local url="$1"
+  local reason="$2"
+  local msg
+  append_failed "$url" "$reason"
+  msg="$(slack_msg failed "$url" "$reason")"
+  slack_post "$msg"
+  notify_requester "$url" "$msg"
   remove_from_queue "$url"
 }
 
@@ -468,7 +494,7 @@ rerun_failed_ci() {
 
 process_pr() {
   local url="$1"
-  local retries=0 ci_result
+  local retries=0 ci_result msg
 
   log "Processing $url"
   set_processing "$url"
@@ -477,23 +503,21 @@ process_pr() {
 
   if ! parse_pr_url "$url"; then
     log "Malformed URL, moving to failed file: $url"
-    append_failed "$url" "malformed URL"
-    slack_post "$(slack_msg failed "$url" "malformed URL")"
-    remove_from_queue "$url"
+    finish_failed "$url" "malformed URL"
     return 0
   fi
 
   local state
   state="$(gh pr view "$url" --json state -q .state 2>/dev/null)" || {
-    append_failed "$url" "gh pr view failed"
-    slack_post "$(slack_msg failed "$url" "gh pr view failed")"
-    remove_from_queue "$url"
+    finish_failed "$url" "gh pr view failed"
     return 0
   }
 
   if [[ "$state" == "MERGED" || "$state" == "CLOSED" ]]; then
     log "PR already $state, removing from queue"
-    slack_post "$(slack_msg already_done "$url" "$state")"
+    msg="$(slack_msg already_done "$url" "$state")"
+    slack_post "$msg"
+    notify_requester "$url" "$msg"
     remove_from_queue "$url"
     return 0
   fi
@@ -562,9 +586,7 @@ process_pr() {
       elif classify_merge_error "$merge_out"; then
         skip_pr "$url" "$(echo "$merge_out" | head -1)"
       else
-        append_failed "$url" "merge failed: $(echo "$merge_out" | head -1)"
-        slack_post "$(slack_msg failed "$url" "merge failed after CI passed")"
-        remove_from_queue "$url"
+        finish_failed "$url" "merge failed after CI passed"
       fi
       return 0
     fi
@@ -572,8 +594,10 @@ process_pr() {
     if (( retries >= MAX_RETRIES )); then
       log "CI failed after $MAX_RETRIES reruns, moving to failed file"
       summary="$(collect_ci_failure "$url")"
-      slack_post_for_pr "$(slack_msg_with_summary ci_failed "$summary" "$url" "$MAX_RETRIES")" "$url"
+      msg="$(slack_msg_with_summary ci_failed "$summary" "$url" "$MAX_RETRIES")"
+      slack_post_for_pr "$msg" "$url"
       append_failed "$url" "CI failed after $MAX_RETRIES reruns"
+      notify_requester "$url" "$msg"
       remove_from_queue "$url"
       return 0
     fi
@@ -590,9 +614,7 @@ process_pr() {
     summary="$(collect_ci_failure "$url")"
     slack_post_for_pr "$(slack_msg_with_summary ci_rerun "$summary" "$url" "$((retries + 1))" "$MAX_RETRIES")" "$url"
     if ! rerun_failed_ci "$url"; then
-      append_failed "$url" "CI failed and could not rerun workflow"
-      slack_post "$(slack_msg failed "$url" "CI failed and could not rerun workflow")"
-      remove_from_queue "$url"
+      finish_failed "$url" "CI failed and could not rerun workflow"
       return 0
     fi
 
