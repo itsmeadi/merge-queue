@@ -26,8 +26,6 @@ display_information:
     Example: `/merge 14699` or `/merge https://github.com/GetStream/chat/pull/14699`
 
     Source: <https://github.com/itsmeadi/merge-queue|github.com/itsmeadi/merge-queue>
-
-    For <https://github.com/GetStream/chat|GetStream/chat> only.
   background_color: "#0052cc"
 
 features:
