@@ -23,6 +23,7 @@ CI_HEAD_WAIT_MAX="${CI_HEAD_WAIT_MAX:-3600}"
 CI_SETTLE_AFTER_SYNC="${CI_SETTLE_AFTER_SYNC:-45}"
 REQUIRED_CHECK="${REQUIRED_CHECK:-Ready to merge}"
 PR_PROCESSING_FILE="${PR_PROCESSING_FILE:-${MERGE_QUEUE_DIR}/processing.txt}"
+QUEUE_STATUS_FILE="${QUEUE_STATUS_FILE:-${MERGE_QUEUE_DIR}/queue-status.json}"
 SLACK_BOT_TOKEN="${SLACK_BOT_TOKEN:-}"
 SLACK_CHANNEL_ID="${SLACK_CHANNEL_ID:-}"
 MERGED_REACTION_EMOJI="${MERGED_REACTION_EMOJI:-merged}"
@@ -163,6 +164,15 @@ notify_requester() {
   MERGE_NOTIFY_TEXT="$text" python3 "$SCRIPT_DIR/slack_notify.py" dm-for-pr "$url" >/dev/null 2>&1 || true
 }
 
+refresh_queue_status() {
+  local finished_url="${1:-}"
+  local finished_label="${2:-done}"
+  if [[ -z "$SLACK_BOT_TOKEN" || -z "$SLACK_CHANNEL_ID" ]]; then
+    return 0
+  fi
+  python3 "$SCRIPT_DIR/slack_status.py" refresh "$finished_url" "$finished_label" >/dev/null 2>&1 || true
+}
+
 collect_ci_failure() {
   local url="$1"
   python3 "$SCRIPT_DIR/ci_summary.py" "$url" 2>/dev/null || echo '{"failed_checks":[],"job":"","excerpt":""}'
@@ -244,6 +254,7 @@ record_merged_pr() {
   slack_post "$msg"
   notify_requester "$url" "$msg"
   remove_from_queue "$url"
+  refresh_queue_status "$url" "done"
 }
 
 skip_pr() {
@@ -256,6 +267,7 @@ skip_pr() {
   slack_post "$msg"
   notify_requester "$url" "$msg"
   remove_from_queue "$url"
+  refresh_queue_status "$url" "skipped"
 }
 
 finish_failed() {
@@ -267,6 +279,7 @@ finish_failed() {
   slack_post "$msg"
   notify_requester "$url" "$msg"
   remove_from_queue "$url"
+  refresh_queue_status "$url" "failed"
 }
 
 # Echo skip reason and return 0 if merge is blocked; return 1 if OK to proceed.
@@ -499,6 +512,7 @@ process_pr() {
   log "Processing $url"
   set_processing "$url"
   trap 'clear_processing' RETURN
+  refresh_queue_status
   slack_post "$(slack_msg processing "$url")"
 
   if ! parse_pr_url "$url"; then
@@ -519,6 +533,7 @@ process_pr() {
     slack_post "$msg"
     notify_requester "$url" "$msg"
     remove_from_queue "$url"
+    refresh_queue_status "$url" "done"
     return 0
   fi
 
@@ -599,6 +614,7 @@ process_pr() {
       append_failed "$url" "CI failed after $MAX_RETRIES reruns"
       notify_requester "$url" "$msg"
       remove_from_queue "$url"
+      refresh_queue_status "$url" "failed"
       return 0
     fi
 

@@ -36,6 +36,7 @@ from queue_meta import lookup_user_id, save_requester, save_thread
 from slack_notify import dm_user
 from queue_ops import append_to_queue as _append_to_queue
 from queue_ops import remove_from_queue as _remove_from_queue
+from slack_status import refresh_queue_status
 
 INSTALL_DIR = Path(__file__).resolve().parent
 QUEUE_DATA_DIR = Path(os.environ.get("MERGE_QUEUE_DIR", str(INSTALL_DIR)))
@@ -45,6 +46,7 @@ PR_SKIPPED_FILE = Path(os.environ.get("PR_SKIPPED_FILE", QUEUE_DATA_DIR / "prs-s
 PR_MERGED_FILE = Path(os.environ.get("PR_MERGED_FILE", QUEUE_DATA_DIR / "prs-merged.txt"))
 PR_PROCESSING_FILE = Path(os.environ.get("PR_PROCESSING_FILE", QUEUE_DATA_DIR / "processing.txt"))
 PR_THREADS_FILE = Path(os.environ.get("PR_THREADS_FILE", QUEUE_DATA_DIR / "prs-threads.json"))
+QUEUE_STATUS_FILE = Path(os.environ.get("QUEUE_STATUS_FILE", QUEUE_DATA_DIR / "queue-status.json"))
 DEFAULT_REPO = os.environ.get("DEFAULT_REPO", "GetStream/chat")
 SLACK_CHANNEL_ID = os.environ.get("SLACK_CHANNEL_ID", "")
 START_WORKER = os.environ.get("START_WORKER", "true").lower() != "false"
@@ -90,6 +92,9 @@ def append_to_queue(url: str) -> tuple[bool, int]:
 def remove_from_queue(url: str) -> tuple[str, int]:
     ensure_queue_files()
     return _remove_from_queue(PR_QUEUE_FILE, PR_THREADS_FILE, PR_PROCESSING_FILE, url)
+
+
+def normalize_pr_input(text: str) -> str | None:
     raw = (text or "").strip()
     if not raw:
         return None
@@ -99,7 +104,7 @@ def remove_from_queue(url: str) -> tuple[str, int]:
     return url if PR_URL_RE.search(url) else None
 
 
-def normalize_pr_input(text: str) -> str | None:
+def parse_history_line(line: str, outcome: str) -> HistoryEntry | None:
     stripped = line.strip()
     if not stripped or stripped.startswith("#"):
         return None
@@ -151,6 +156,21 @@ def read_processing() -> str:
     if not PR_PROCESSING_FILE.exists():
         return ""
     return PR_PROCESSING_FILE.read_text().strip()
+
+
+def refresh_status_board(
+    finished_url: str = "",
+    finished_label: str = "done",
+) -> None:
+    def _run() -> None:
+        refresh_queue_status(
+            channel_id=SLACK_CHANNEL_ID,
+            anchor_file=QUEUE_STATUS_FILE,
+            finished_url=finished_url,
+            finished_label=finished_label,
+        )
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def capture_thread_ts(client: Any, channel_id: str, message: str, url: str) -> None:
@@ -230,6 +250,7 @@ def handle_merge_command(
         capture_thread_ts(client, channel_id, message, url)
 
     threading.Thread(target=save_thread_async, daemon=True).start()
+    refresh_status_board()
 
 
 def handle_remove_command(
@@ -260,6 +281,7 @@ def handle_remove_command(
         notify_user_id = requester_id or actor_user_id
         if notify_user_id:
             dm_user(notify_user_id, message)
+        refresh_status_board(finished_url=url, finished_label="removed")
 
 
 def slack_add_reaction(client: Any, channel_id: str, timestamp: str, emoji: str) -> None:
@@ -401,6 +423,7 @@ def handle_merge_reaction(client: Any, event: dict[str, Any]) -> None:
         slack_add_reaction(client, channel_id, message_ts, REACTION_ACK_OK)
     slack_post_thread(client, channel_id, thread_ts, message)
     print(f"reaction queued {url} at position {position}", file=sys.stderr)
+    refresh_status_board()
 
 
 def worker_env() -> dict[str, str]:
@@ -413,6 +436,7 @@ def worker_env() -> dict[str, str]:
             "PR_SKIPPED_FILE": str(PR_SKIPPED_FILE),
             "PR_MERGED_FILE": str(PR_MERGED_FILE),
             "PR_THREADS_FILE": str(PR_THREADS_FILE),
+            "QUEUE_STATUS_FILE": str(QUEUE_STATUS_FILE),
             "SLACK_CHANNEL_ID": SLACK_CHANNEL_ID,
             "MERGED_REACTION_EMOJI": os.environ.get("MERGED_REACTION_EMOJI", "merged"),
         }
@@ -514,7 +538,11 @@ def create_app() -> App:
     @app.command("/merge-status")
     def handle_merge_status(ack, respond, command):
         ack()
-        respond(response_type="in_channel", text=build_queue_status_message())
+        refresh_queue_status(
+            channel_id=SLACK_CHANNEL_ID,
+            anchor_file=QUEUE_STATUS_FILE,
+        )
+        respond(response_type="ephemeral", text="Queue board updated.")
 
     @app.command("/merge-history")
     def handle_merge_history(ack, respond, command):

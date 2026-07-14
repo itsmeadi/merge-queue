@@ -66,6 +66,25 @@ class FormatQueueStatusTest(unittest.TestCase):
         self.assertIn(":hourglass_flowing_sand:", text)
         self.assertIn("Who's in line?", text)
 
+    def test_processing_shows_loading(self) -> None:
+        text = format_queue_status([URL2], 0, 0, processing_url=URL)
+        self.assertIn(":loading:", text)
+        self.assertIn("processing", text)
+        self.assertIn(pr_link(URL), text)
+        self.assertNotIn(pr_link(URL2), text.split("processing")[0])
+
+    def test_finished_shows_done(self) -> None:
+        text = format_queue_status([URL2], 0, 0, finished_url=URL, finished_label="done")
+        self.assertIn(":white_check_mark:", text)
+        self.assertIn("· done", text)
+        self.assertIn(pr_link(URL), text)
+        self.assertNotIn(":loading:", text)
+
+    def test_finished_skipped_emoji(self) -> None:
+        text = format_queue_status([], 0, 1, finished_url=URL, finished_label="skipped")
+        self.assertIn(":rabbit2:", text)
+        self.assertIn("· skipped", text)
+
 
 class FormatPreflightRejectTest(unittest.TestCase):
     def test_includes_link_and_cute_reason(self) -> None:

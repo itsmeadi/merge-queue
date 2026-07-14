@@ -122,19 +122,46 @@ def _format_queue_lines(
     return lines
 
 
+def _finished_emoji(label: str) -> str:
+    text = (label or "done").strip().lower()
+    if text in ("done", "removed", "merged"):
+        return ":white_check_mark:"
+    if text == "skipped":
+        return ":rabbit2:"
+    if text == "failed":
+        return ":x:"
+    return ":white_check_mark:"
+
+
 def format_queue_status(
     queue: list[str],
     failed_count: int,
     skipped_count: int,
     processing_url: str = "",
+    finished_url: str = "",
+    finished_label: str = "done",
 ) -> str:
     lines = [":hourglass_flowing_sand: *Who's in line?*"]
-    waiting = [url for url in queue if url != processing_url]
+    excluded = {finished_url} if finished_url else set()
+    active_processing = processing_url if processing_url not in excluded else ""
 
-    if not waiting and not processing_url:
+    entries: list[str] = []
+    if finished_url:
+        entries.append(
+            f"{_finished_emoji(finished_label)} {pr_link(finished_url)} · {finished_label}"
+        )
+    if active_processing:
+        entries.append(f":loading: {pr_link(active_processing)} · processing")
+    for url in queue:
+        if url in excluded or url == active_processing:
+            continue
+        entries.append(f"{pr_link(url)}")
+
+    if not entries:
         lines.append("_Queue is empty — all quiet_")
     else:
-        lines.extend(_format_queue_lines(queue, processing_url))
+        for index, entry in enumerate(entries, start=1):
+            lines.append(f"{index}. {entry}")
 
     lines.append(f"\n_{len(queue)} waiting · {failed_count} failed · {skipped_count} skipped_")
     return "\n".join(lines)
