@@ -9,10 +9,11 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
+
+from history import HistoryEntry, dedupe_history_by_url
 
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
@@ -66,14 +67,6 @@ PR_URL_RE = re.compile(r"github\.com/[^/]+/[^/]+/pull/\d+")
 HISTORY_LINE_RE = re.compile(
     r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (\S+)(?: # (.+))?$"
 )
-
-
-@dataclass(frozen=True)
-class HistoryEntry:
-    timestamp: datetime
-    url: str
-    outcome: str
-    reason: str
 
 
 def ensure_queue_files() -> None:
@@ -137,7 +130,7 @@ def read_recent_history(n: int) -> list[HistoryEntry]:
     entries.extend(read_history_file(PR_SKIPPED_FILE, "skipped"))
     entries.extend(read_history_file(PR_FAILED_FILE, "failed"))
     entries.sort(key=lambda e: e.timestamp, reverse=True)
-    return entries[:n]
+    return dedupe_history_by_url(entries)[:n]
 
 
 def build_history_message(n: int) -> str:

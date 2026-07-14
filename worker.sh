@@ -219,7 +219,19 @@ append_skipped() {
 
 append_merged() {
   local url="$1"
+  if [[ -f "$PR_MERGED_FILE" ]] && grep -qF "$url # merged" "$PR_MERGED_FILE"; then
+    log "Already recorded merged: $url"
+    return 0
+  fi
   echo "$(date '+%Y-%m-%d %H:%M:%S') $url # merged" >>"$PR_MERGED_FILE"
+}
+
+record_merged_pr() {
+  local url="$1"
+  append_merged "$url"
+  slack_react_for_pr "$url"
+  slack_post "$(slack_msg merged "$url")"
+  remove_from_queue "$url"
 }
 
 skip_pr() {
@@ -300,6 +312,11 @@ merge_attempt_blocked_reason() {
 classify_merge_error() {
   local err="$1"
   grep -qiE 'review|approv|not allowed|blocked|policy|permission|protected|required' <<<"$err"
+}
+
+is_already_merged_error() {
+  local err="$1"
+  grep -qiE 'already merged|was merged|not open|pull request is closed' <<<"$err"
 }
 
 merge_flag() {
@@ -528,13 +545,20 @@ process_pr() {
       fi
 
       log "CI passed and PR is up to date — merging"
+      state="$(gh pr view "$url" --json state -q .state 2>/dev/null || echo "")"
+      if [[ "$state" == "MERGED" ]]; then
+        log "PR already merged (likely auto-merge) — recording outcome"
+        record_merged_pr "$url"
+        return 0
+      fi
+
       local merge_out=""
       if merge_out="$(gh pr merge "$url" "$(merge_flag)" 2>&1)"; then
         log "Merged $url"
-        append_merged "$url"
-        slack_react_for_pr "$url"
-        slack_post "$(slack_msg merged "$url")"
-        remove_from_queue "$url"
+        record_merged_pr "$url"
+      elif is_already_merged_error "$merge_out"; then
+        log "PR already merged during merge attempt — recording outcome"
+        record_merged_pr "$url"
       elif classify_merge_error "$merge_out"; then
         skip_pr "$url" "$(echo "$merge_out" | head -1)"
       else
