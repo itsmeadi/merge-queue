@@ -9,20 +9,23 @@
 #   5. Copy .env.example → .env, fill in tokens, run ./start.sh
 #
 # Invite the bot to your channel: /invite @merge-bot
+#
+# Update long_description: paste this entire file via Features → App Manifest
+# (not Basic Information). The About tab auto-links bare https URLs only.
 
 display_information:
   name: Merge Queue Bot
-  description: FIFO merge queue for GetStream/chat — queue PRs, sync with base, wait for CI, squash merge.
+  description: FIFO merge queue for GetStream/chat PRs. Commands - merge, merge-status, merge-history, merge-deploy.
   long_description: |
-    Merge Queue Bot queues pull requests for [GetStream/chat](https://github.com/GetStream/chat). Queue a PR from Slack and the worker handles the rest: sync with base, wait for CI on the latest commit, squash merge when green.
+    Queue GetStream/chat pull requests from Slack: https://github.com/GetStream/chat
 
-    One PR at a time — no merge-from-master stampede. Syncs with base via gh pr update-branch when behind. Waits for Ready to merge on the current HEAD. Skips conflicts, missing approval, and branch policy. Retries flaky CI up to 3 times and posts failure details in thread.
+    Syncs each branch with the base branch, waits for CI on the latest commit, and squash merges when green.
 
-    Commands: /merge, /merge-queue, /merge-status, /merge-history, /merge-deploy (admins only).
+    Skips PRs that cannot merge and retries flaky CI failures.
 
-    Bot source: [github.com/itsmeadi/merge-queue](https://github.com/itsmeadi/merge-queue)
+    Commands: merge, merge-queue, merge-status, merge-history, merge-deploy (admin only).
 
-    Target repo: [GetStream/chat](https://github.com/GetStream/chat)
+    Source: https://github.com/itsmeadi/merge-queue
   background_color: "#0052cc"
 
 features:
