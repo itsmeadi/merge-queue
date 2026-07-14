@@ -9,7 +9,7 @@ if [[ -f "$SCRIPT_DIR/.env" ]]; then
   set +a
 fi
 
-MERGE_QUEUE_DIR="${MERGE_QUEUE_DIR:-/srv/stream/merge-queue}"
+MERGE_QUEUE_DIR="${MERGE_QUEUE_DIR:-$SCRIPT_DIR}"
 PR_QUEUE_FILE="${PR_QUEUE_FILE:-${MERGE_QUEUE_DIR}/prs.txt}"
 PR_FAILED_FILE="${PR_FAILED_FILE:-${MERGE_QUEUE_DIR}/prs-failed.txt}"
 PR_SKIPPED_FILE="${PR_SKIPPED_FILE:-${MERGE_QUEUE_DIR}/prs-skipped.txt}"
@@ -34,8 +34,8 @@ Poll a file of PR URLs, update each with master, wait for CI (rerun on failure),
 and merge when green. Optionally post status updates to Slack.
 
 Options:
-  -f FILE   Queue file (default: /srv/stream/merge-queue/prs.txt)
-  -o FILE   Failed PRs output file (default: /srv/stream/merge-queue/prs-failed.txt)
+  -f FILE   Queue file (default: \$MERGE_QUEUE_DIR/prs.txt, install dir)
+  -o FILE   Failed PRs output file (default: \$MERGE_QUEUE_DIR/prs-failed.txt)
   -r N      Max CI rerun attempts per PR (default: 5)
   -p N      Poll interval when queue is empty, seconds (default: 10)
   -i N      CI check poll interval, seconds (default: 10)
@@ -43,7 +43,7 @@ Options:
   --once    Process one PR then exit (even if queue has more)
   -h        Show this help
 
-Environment variables: MERGE_QUEUE_DIR (default: /srv/stream/merge-queue),
+Environment variables: MERGE_QUEUE_DIR (default: install dir, same as this script),
 PR_QUEUE_FILE, PR_FAILED_FILE, PR_SKIPPED_FILE, PR_MERGED_FILE, MAX_RETRIES,
 POLL_INTERVAL, CHECK_INTERVAL, MERGE_METHOD (default: squash),
 CI_HEAD_WAIT_MAX, CI_SETTLE_AFTER_SYNC, REQUIRED_CHECK, PR_PROCESSING_FILE,

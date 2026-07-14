@@ -19,7 +19,7 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from messages import format_history_lines, format_queue_status, format_queued
 
 INSTALL_DIR = Path(__file__).resolve().parent
-QUEUE_DATA_DIR = Path(os.environ.get("MERGE_QUEUE_DIR", "/srv/stream/merge-queue"))
+QUEUE_DATA_DIR = Path(os.environ.get("MERGE_QUEUE_DIR", str(INSTALL_DIR)))
 PR_QUEUE_FILE = Path(os.environ.get("PR_QUEUE_FILE", QUEUE_DATA_DIR / "prs.txt"))
 PR_FAILED_FILE = Path(os.environ.get("PR_FAILED_FILE", QUEUE_DATA_DIR / "prs-failed.txt"))
 PR_SKIPPED_FILE = Path(os.environ.get("PR_SKIPPED_FILE", QUEUE_DATA_DIR / "prs-skipped.txt"))

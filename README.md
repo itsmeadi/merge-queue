@@ -127,9 +127,10 @@ Worker behavior:
 | `CI_HEAD_WAIT_MAX` | `3600` | Max seconds to wait for CI on HEAD commit |
 | `CI_SETTLE_AFTER_SYNC` | `45` | Seconds to wait after `update-branch` before trusting CI status |
 | `REQUIRED_CHECK` | `Ready to merge` | Required GitHub check that must pass before merge |
+| `MERGE_QUEUE_DIR` | install dir | Queue + history files live next to `bot.py` |
 | `PR_PROCESSING_FILE` | `.../processing.txt` | PR currently being processed (shown in `/merge-status`) |
-| `PR_SKIPPED_FILE` | `/srv/stream/merge-queue/prs-skipped.txt` | Skipped PRs (approval, conflict, policy) |
-| `PR_MERGED_FILE` | `/srv/stream/merge-queue/prs-merged.txt` | Successfully merged PRs |
+| `PR_SKIPPED_FILE` | `.../prs-skipped.txt` | Skipped PRs (approval, conflict, policy) |
+| `PR_MERGED_FILE` | `.../prs-merged.txt` | Successfully merged PRs |
 | `START_WORKER` | `true` | Set `false` to run worker separately |
 | `DEPLOY_ENABLED` | `false` | Enable `/merge-deploy` |
 | `DEPLOY_ALLOWED_USER_IDS` | — | Comma-separated Slack user IDs allowed to deploy |
@@ -148,7 +149,7 @@ View recent outcomes in Slack: `/merge-history` (default last 5).
 Re-queue a skipped PR after approval:
 
 ```bash
-echo 'https://github.com/GetStream/chat/pull/12345' >> /srv/stream/merge-queue/prs.txt
+echo 'https://github.com/GetStream/chat/pull/12345' >> ~/merge-queue/prs.txt
 ```
 
 ## Run worker standalone
