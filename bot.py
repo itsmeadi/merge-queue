@@ -24,11 +24,16 @@ from messages import (
     format_queue_status,
     format_queued,
     format_reaction_no_pr,
+    format_remove_not_found,
+    format_remove_processing,
+    format_removed,
     pr_label,
 )
 from pr_extract import extract_pr_urls
 from pr_preflight import check_pr_preflight
 from queue_meta import save_thread
+from queue_ops import append_to_queue as _append_to_queue
+from queue_ops import remove_from_queue as _remove_from_queue
 
 INSTALL_DIR = Path(__file__).resolve().parent
 QUEUE_DATA_DIR = Path(os.environ.get("MERGE_QUEUE_DIR", str(INSTALL_DIR)))
@@ -83,7 +88,14 @@ def read_queue() -> list[str]:
     return [line.strip() for line in lines if line.strip() and not line.strip().startswith("#")]
 
 
-def normalize_pr_input(text: str) -> str | None:
+def append_to_queue(url: str) -> tuple[bool, int]:
+    ensure_queue_files()
+    return _append_to_queue(PR_QUEUE_FILE, url)
+
+
+def remove_from_queue(url: str) -> tuple[str, int]:
+    ensure_queue_files()
+    return _remove_from_queue(PR_QUEUE_FILE, PR_THREADS_FILE, PR_PROCESSING_FILE, url)
     raw = (text or "").strip()
     if not raw:
         return None
@@ -93,16 +105,7 @@ def normalize_pr_input(text: str) -> str | None:
     return url if PR_URL_RE.search(url) else None
 
 
-def append_to_queue(url: str) -> tuple[bool, int]:
-    queue = read_queue()
-    if url in queue:
-        return False, queue.index(url) + 1
-    with PR_QUEUE_FILE.open("a") as f:
-        f.write(f"{url}\n")
-    return True, len(queue) + 1
-
-
-def parse_history_line(line: str, outcome: str) -> HistoryEntry | None:
+def normalize_pr_input(text: str) -> str | None:
     stripped = line.strip()
     if not stripped or stripped.startswith("#"):
         return None
@@ -230,6 +233,27 @@ def handle_merge_command(
         capture_thread_ts(client, channel_id, message, url)
 
     threading.Thread(target=save_thread_async, daemon=True).start()
+
+
+def handle_remove_command(respond: Callable[..., Any], text: str) -> None:
+    url = normalize_pr_input(text)
+    if not url:
+        respond(
+            response_type="ephemeral",
+            text=(
+                "Usage: `/merge-remove 12345` "
+                f"or `/merge-remove https://github.com/{DEFAULT_REPO}/pull/12345`"
+            ),
+        )
+        return
+
+    status, position = remove_from_queue(url)
+    if status == "processing":
+        respond(response_type="in_channel", text=format_remove_processing(url))
+    elif status == "not_found":
+        respond(response_type="ephemeral", text=format_remove_not_found(url))
+    else:
+        respond(response_type="in_channel", text=format_removed(url, position))
 
 
 def slack_add_reaction(client: Any, channel_id: str, timestamp: str, emoji: str) -> None:
@@ -463,6 +487,11 @@ def create_app() -> App:
             command["channel_id"],
             command.get("text", ""),
         )
+
+    @app.command("/merge-remove")
+    def handle_merge_remove(ack, respond, command):
+        ack()
+        handle_remove_command(respond, command.get("text", ""))
 
     @app.command("/merge-status")
     def handle_merge_status(ack, respond, command):

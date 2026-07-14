@@ -12,6 +12,9 @@ from messages import (
     format_preflight_reject,
     format_queued,
     format_queue_status,
+    format_removed,
+    format_remove_not_found,
+    format_remove_processing,
     pr_link,
     reason_emoji,
 )
@@ -71,6 +74,24 @@ class FormatPreflightRejectTest(unittest.TestCase):
         self.assertIn(pr_link(URL), text)
         self.assertIn("not queued", text)
         self.assertIn("still needs a thumbs-up", text)
+
+
+class FormatRemoveTest(unittest.TestCase):
+    def test_removed(self) -> None:
+        text = format_removed(URL, 2)
+        self.assertIn(":wastebasket:", text)
+        self.assertIn(pr_link(URL), text)
+        self.assertIn("was spot 2", text)
+
+    def test_not_found(self) -> None:
+        text = format_remove_not_found(URL)
+        self.assertIn("not in queue", text)
+        self.assertIn(pr_link(URL), text)
+
+    def test_processing(self) -> None:
+        text = format_remove_processing(URL)
+        self.assertIn("already merging", text)
+        self.assertIn(pr_link(URL), text)
 
 
 class FormatMergedTest(unittest.TestCase):

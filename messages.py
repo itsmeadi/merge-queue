@@ -202,6 +202,18 @@ def format_reaction_no_pr() -> str:
     return ":ghost: couldn't find a PR link in this message — use `/merge 14699`"
 
 
+def format_removed(url: str, position: int) -> str:
+    return f":wastebasket: {pr_link(url)} · removed from queue (was spot {position})"
+
+
+def format_remove_not_found(url: str) -> str:
+    return f":information_source: {pr_link(url)} · not in queue"
+
+
+def format_remove_processing(url: str) -> str:
+    return f":hourglass_flowing_sand: {pr_link(url)} · already merging — can't remove"
+
+
 def format_failed(url: str, reason: str) -> str:
     emoji = reason_emoji("failed", reason)
     return f"{emoji} {pr_link(url)} · {cute_reason(reason, 'failed')}"

@@ -62,6 +62,7 @@ Keep it running with `tmux`, `screen`, or systemd.
 |---------|-------------|
 | `/merge 12345` | Queue a PR (number or full URL); rejects immediately if PR is missing, closed/merged, conflicting, or not approved |
 | `/merge-queue 12345` | Same as `/merge` |
+| `/merge-remove 12345` | Remove a PR from the queue (won't stop one already merging) |
 | `/merge-status` | Show current queue |
 | `/merge-history` | Show last 5 completed PRs (optional count, max 50) |
 | `/merge-deploy` | Pull from git and restart bot + worker (allowlisted users only) |

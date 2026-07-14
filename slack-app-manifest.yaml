@@ -15,13 +15,13 @@
 
 display_information:
   name: Merge Queue Bot
-  description: FIFO merge queue for GetStream/chat PRs. Commands - merge, merge-status, merge-history, merge-deploy.
+  description: FIFO merge queue for GetStream/chat PRs. Commands - merge, merge-remove, merge-status, merge-history, merge-deploy.
   long_description: |
     Queue <https://github.com/GetStream/chat|GetStream/chat> pull requests from Slack. Syncs each branch with the base branch, waits for CI on the latest commit, and squash merges when green.
 
     Skips PRs that cannot merge and retries flaky CI failures.
 
-    Commands: `/merge`, `/merge-queue`, `/merge-status`, `/merge-history`, `/merge-deploy` (admin only).
+    Commands: `/merge`, `/merge-queue`, `/merge-remove`, `/merge-status`, `/merge-history`, `/merge-deploy` (admin only).
 
     React with `:merge_bot:` on a GitHub PR message to queue it. When merged, the bot adds `:merged:` to that message.
 
@@ -41,6 +41,10 @@ features:
       should_escape: false
     - command: /merge-queue
       description: Add a PR to the merge queue (alias)
+      usage_hint: "14699 or https://github.com/GetStream/chat/pull/14699"
+      should_escape: false
+    - command: /merge-remove
+      description: Remove a PR from the merge queue
       usage_hint: "14699 or https://github.com/GetStream/chat/pull/14699"
       should_escape: false
     - command: /merge-status
