@@ -21,6 +21,15 @@ merge-queue/
 
 Runtime files (created automatically): `prs.txt`, `prs-failed.txt`, `prs-skipped.txt`, `prs-merged.txt`, `.venv/`
 
+**Agent / CLI enqueue** (same preflight + queue as Slack `/merge`):
+
+```bash
+python3 enqueue.py 12345
+python3 enqueue.py https://github.com/GetStream/chat/pull/12345 --json
+```
+
+Used by the chat repo `pr-monitor` skill via SSH to the merge-bot host.
+
 ## Prerequisites on the host
 
 - Python 3.9+
