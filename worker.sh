@@ -183,14 +183,16 @@ slack_msg_with_summary() {
   local summary="$2"
   shift 2
   if [[ -n "$summary" && "$summary" != "{}" ]]; then
-    printf '%s' "$summary" | python3 "$SCRIPT_DIR/messages.py" "$cmd" "$@" --summary-stdin
+    printf '%s' "$summary" | python3 "$SCRIPT_DIR/messages.py" "$cmd" "$@" --summary-stdin \
+      || python3 "$SCRIPT_DIR/messages.py" "$cmd" "$@" \
+      || true
   else
     slack_msg "$cmd" "$@"
   fi
 }
 
 slack_msg() {
-  python3 "$SCRIPT_DIR/messages.py" "$@"
+  python3 "$SCRIPT_DIR/messages.py" "$@" || true
 }
 
 parse_pr_url() {
@@ -491,18 +493,29 @@ wait_for_ci_on_head() {
 rerun_failed_ci() {
   local url="$1"
   local branch run_id oid
-  branch="$(gh pr view "$url" --json headRefName -q .headRefName)"
-  oid="$(head_ref_oid "$url")"
+
+  branch="$(gh pr view "$url" --json headRefName -q .headRefName 2>/dev/null || true)"
+  oid="$(head_ref_oid "$url" || true)"
+  if [[ -z "$branch" || -z "$oid" || "$oid" == "null" ]]; then
+    log "Could not resolve branch/HEAD for CI rerun"
+    return 1
+  fi
+
   run_id="$(gh run list -R "$PR_FULL_REPO" --commit "$oid" -L 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)"
   if [[ -z "$run_id" || "$run_id" == "null" ]]; then
-    run_id="$(gh run list -R "$PR_FULL_REPO" -b "$branch" -L 1 --json databaseId -q '.[0].databaseId')"
+    run_id="$(gh run list -R "$PR_FULL_REPO" -b "$branch" -L 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)"
   fi
   if [[ -z "$run_id" || "$run_id" == "null" ]]; then
     log "No workflow run found for branch $branch; cannot rerun"
     return 1
   fi
+
   log "Rerunning failed jobs for run $run_id"
-  gh run rerun "$run_id" --failed -R "$PR_FULL_REPO"
+  if ! gh run rerun "$run_id" --failed -R "$PR_FULL_REPO"; then
+    log "gh run rerun failed for run $run_id"
+    return 1
+  fi
+  return 0
 }
 
 process_pr() {
@@ -613,10 +626,10 @@ process_pr() {
     if (( retries >= MAX_RETRIES )); then
       log "CI failed after $MAX_RETRIES reruns, moving to failed file"
       summary="$(collect_ci_failure "$url")"
-      msg="$(slack_msg_with_summary ci_failed "$summary" "$url" "$MAX_RETRIES")"
-      slack_post_for_pr "$msg" "$url"
+      msg="$(slack_msg_with_summary ci_failed "$summary" "$url" "$MAX_RETRIES" || true)"
+      [[ -n "$msg" ]] && slack_post_for_pr "$msg" "$url"
       append_failed "$url" "CI failed after $MAX_RETRIES reruns"
-      notify_requester "$url" "$msg"
+      [[ -n "$msg" ]] && notify_requester "$url" "$msg"
       remove_from_queue "$url"
       refresh_queue_status "$url" "failed"
       return 0
@@ -632,7 +645,8 @@ process_pr() {
     fi
 
     summary="$(collect_ci_failure "$url")"
-    slack_post_for_pr "$(slack_msg_with_summary ci_rerun "$summary" "$url" "$((retries + 1))" "$MAX_RETRIES")" "$url"
+    msg="$(slack_msg_with_summary ci_rerun "$summary" "$url" "$((retries + 1))" "$MAX_RETRIES" || true)"
+    [[ -n "$msg" ]] && slack_post_for_pr "$msg" "$url"
     if ! rerun_failed_ci "$url"; then
       finish_failed "$url" "CI failed and could not rerun workflow"
       return 0
