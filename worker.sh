@@ -371,12 +371,12 @@ merge_flag() {
 
 merge_state_status() {
   local url="$1"
-  gh pr view "$url" --json mergeStateStatus -q .mergeStateStatus 2>/dev/null
+  gh pr view "$url" --json mergeStateStatus -q .mergeStateStatus 2>/dev/null || true
 }
 
 head_ref_oid() {
   local url="$1"
-  gh pr view "$url" --json headRefOid -q .headRefOid 2>/dev/null
+  gh pr view "$url" --json headRefOid -q .headRefOid 2>/dev/null || true
 }
 
 is_pr_behind() {
@@ -386,7 +386,7 @@ is_pr_behind() {
 required_check_bucket() {
   local url="$1"
   gh pr checks "$url" --json name,bucket -q \
-    '.[] | select(.name=="'"$REQUIRED_CHECK"'") | .bucket' 2>/dev/null | head -1
+    '.[] | select(.name=="'"$REQUIRED_CHECK"'") | .bucket' 2>/dev/null | head -1 || true
 }
 
 set_processing() {
@@ -623,36 +623,49 @@ process_pr() {
       return 0
     fi
 
+    # CI failed (ci_result != 0). Disable set -e for this path so Slack/gh
+    # noise cannot abort the worker into a restart loop.
+    set +e
     if (( retries >= MAX_RETRIES )); then
       log "CI failed after $MAX_RETRIES reruns, moving to failed file"
       summary="$(collect_ci_failure "$url")"
-      msg="$(slack_msg_with_summary ci_failed "$summary" "$url" "$MAX_RETRIES" || true)"
-      [[ -n "$msg" ]] && slack_post_for_pr "$msg" "$url"
+      msg="$(slack_msg_with_summary ci_failed "$summary" "$url" "$MAX_RETRIES")"
+      if [[ -n "$msg" ]]; then
+        slack_post_for_pr "$msg" "$url"
+        notify_requester "$url" "$msg"
+      fi
       append_failed "$url" "CI failed after $MAX_RETRIES reruns"
-      [[ -n "$msg" ]] && notify_requester "$url" "$msg"
       remove_from_queue "$url"
       refresh_queue_status "$url" "failed"
+      set -e
       return 0
     fi
 
     if is_pr_behind "$url"; then
       log "PR behind base after CI failure — syncing before rerun"
       if ! sync_with_base "$url"; then
+        set -e
         skip_pr "$url" "merge conflict (behind base after CI failure)"
         return 0
       fi
+      set -e
       continue
     fi
 
+    log "CI failed — collecting summary and attempting rerun (retry $((retries + 1))/$MAX_RETRIES)"
     summary="$(collect_ci_failure "$url")"
-    msg="$(slack_msg_with_summary ci_rerun "$summary" "$url" "$((retries + 1))" "$MAX_RETRIES" || true)"
-    [[ -n "$msg" ]] && slack_post_for_pr "$msg" "$url"
+    msg="$(slack_msg_with_summary ci_rerun "$summary" "$url" "$((retries + 1))" "$MAX_RETRIES")"
+    if [[ -n "$msg" ]]; then
+      slack_post_for_pr "$msg" "$url"
+    fi
     if ! rerun_failed_ci "$url"; then
+      set -e
       finish_failed "$url" "CI failed and could not rerun workflow"
       return 0
     fi
 
     retries=$((retries + 1))
+    set -e
   done
 }
 
@@ -692,7 +705,14 @@ main() {
       sleep "$POLL_INTERVAL"
       continue
     fi
+    # Isolate process_pr so set -e inside cannot kill the whole worker loop.
+    set +e
     process_pr "${prs[0]}"
+    pr_rc=$?
+    set -e
+    if (( pr_rc != 0 )); then
+      log "WARN: process_pr exited $pr_rc for ${prs[0]} — continuing queue loop"
+    fi
     if $ONCE; then
       exit 0
     fi
