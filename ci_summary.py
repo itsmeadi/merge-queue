@@ -16,6 +16,7 @@ GO_FILE_RE = re.compile(r"^\s+(\S+_test\.go:\d+:.*)$", re.MULTILINE)
 GENERIC_FAIL_RE = re.compile(r"(FAIL|Error:|exit code 1)", re.IGNORECASE)
 
 MAX_EXCERPT = 400
+SKIP_RERUN_CHECK_NAMES = frozenset({"ready to merge"})
 
 
 def parse_repo(url: str) -> str | None:
@@ -100,6 +101,90 @@ def parse_excerpt(log_text: str) -> str:
     return excerpt
 
 
+def fetch_head_ref(url: str) -> tuple[str, str]:
+    """Return (branch, head_oid) for a PR."""
+    result = run_gh(
+        ["gh", "pr", "view", url, "--json", "headRefName,headRefOid"],
+    )
+    if result.returncode != 0:
+        return "", ""
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return "", ""
+    if not isinstance(data, dict):
+        return "", ""
+    branch = str(data.get("headRefName") or "").strip()
+    oid = str(data.get("headRefOid") or "").strip()
+    return branch, oid
+
+
+def list_failed_run_id(repo: str, *, commit: str = "", branch: str = "") -> str | None:
+    args = [
+        "gh",
+        "run",
+        "list",
+        "-R",
+        repo,
+        "--status",
+        "failure",
+        "-L",
+        "5",
+        "--json",
+        "databaseId",
+    ]
+    if commit:
+        args.extend(["--commit", commit])
+    elif branch:
+        args.extend(["-b", branch])
+    else:
+        return None
+
+    result = run_gh(args)
+    if result.returncode != 0:
+        return None
+    try:
+        runs = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(runs, list):
+        return None
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        run_id = str(run.get("databaseId") or "").strip()
+        if run_id and run_id != "null":
+            return run_id
+    return None
+
+
+def find_rerun_run_id(url: str) -> str | None:
+    """Pick a failed Actions run to rerun — not the latest run on HEAD."""
+    failed_checks = fetch_failed_checks(url)
+    seen: set[str] = set()
+    for check in failed_checks:
+        name = str(check.get("name") or "").strip()
+        if name.lower() in SKIP_RERUN_CHECK_NAMES:
+            continue
+        run_id = extract_run_id(str(check.get("link") or ""))
+        if run_id and run_id not in seen:
+            seen.add(run_id)
+            return run_id
+
+    repo = parse_repo(url)
+    if not repo:
+        return None
+
+    branch, oid = fetch_head_ref(url)
+    if oid:
+        run_id = list_failed_run_id(repo, commit=oid)
+        if run_id:
+            return run_id
+    if branch:
+        return list_failed_run_id(repo, branch=branch)
+    return None
+
+
 def collect_ci_failure(url: str) -> dict[str, Any]:
     failed_checks = fetch_failed_checks(url)
     names = [str(check.get("name", "")) for check in failed_checks if check.get("name")]
@@ -120,6 +205,18 @@ def collect_ci_failure(url: str) -> dict[str, Any]:
 
 
 def main() -> None:
+    if len(sys.argv) < 2:
+        sys.exit(2)
+
+    if sys.argv[1] == "rerun-run-id":
+        if len(sys.argv) != 3:
+            sys.exit(2)
+        run_id = find_rerun_run_id(sys.argv[2])
+        if not run_id:
+            sys.exit(1)
+        print(run_id)
+        sys.exit(0)
+
     if len(sys.argv) != 2:
         sys.exit(2)
     print(json.dumps(collect_ci_failure(sys.argv[1])))

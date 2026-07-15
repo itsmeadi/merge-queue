@@ -492,21 +492,11 @@ wait_for_ci_on_head() {
 
 rerun_failed_ci() {
   local url="$1"
-  local branch run_id oid
+  local run_id
 
-  branch="$(gh pr view "$url" --json headRefName -q .headRefName 2>/dev/null || true)"
-  oid="$(head_ref_oid "$url" || true)"
-  if [[ -z "$branch" || -z "$oid" || "$oid" == "null" ]]; then
-    log "Could not resolve branch/HEAD for CI rerun"
-    return 1
-  fi
-
-  run_id="$(gh run list -R "$PR_FULL_REPO" --commit "$oid" -L 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)"
-  if [[ -z "$run_id" || "$run_id" == "null" ]]; then
-    run_id="$(gh run list -R "$PR_FULL_REPO" -b "$branch" -L 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)"
-  fi
-  if [[ -z "$run_id" || "$run_id" == "null" ]]; then
-    log "No workflow run found for branch $branch; cannot rerun"
+  run_id="$(python3 "$SCRIPT_DIR/ci_summary.py" rerun-run-id "$url" 2>/dev/null || true)"
+  if [[ -z "$run_id" ]]; then
+    log "No failed Actions run to rerun (failures may be aggregate checks like '${REQUIRED_CHECK}')"
     return 1
   fi
 
